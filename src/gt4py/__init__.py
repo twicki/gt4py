@@ -36,7 +36,6 @@ from .definitions import (
     Boundary,
     DomainInfo,
     FieldInfo,
-    Grid,
     ParameterInfo,
     CartesianSpace,
     StencilObject,

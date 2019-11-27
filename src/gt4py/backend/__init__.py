@@ -16,6 +16,7 @@
 
 from .concepts import *
 
+from .dawn_backends import *
 from .debug_backend import *
 from .numpy_backend import *
 from .base_gt_backend import *

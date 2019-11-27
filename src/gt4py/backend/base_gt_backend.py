@@ -50,7 +50,7 @@ _extract_max_k_offset = _MaxKOffsetExtractor.apply
 
 class GTSourceGenerator(gt_ir.IRNodeVisitor):
 
-    TEMPLATE_DIR = os.path.dirname(__file__) + "/templates"
+    TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
     TEMPLATE_FILES = {
         "computation.hpp": "computation.hpp.in",
         "computation.src": "computation.src.in",
@@ -361,7 +361,7 @@ class GTSourceGenerator(gt_ir.IRNodeVisitor):
         template_args = dict(
             stencil_unique_name=self.class_name,
             module_name=self.module_name,
-            backend=self.backend,
+            gt_backend=self.backend,
             k_axis=k_axis,
             halo_sizes=halo_sizes,
             constants=constants,

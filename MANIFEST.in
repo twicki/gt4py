@@ -1,5 +1,5 @@
 include *.md
 include *.rst
 include *.toml
-include requirements*.txt
+include *.txt
 include src/gridtools/backend/templates/*

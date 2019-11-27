@@ -24,6 +24,7 @@ import types
 
 import jinja2
 
+from gt4py import analysis as gt_analysis
 from gt4py import config as gt_config
 from gt4py import definitions as gt_definitions
 from gt4py import utils as gt_utils
@@ -77,7 +78,7 @@ class Backend(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def build(cls, stencil_id, performance_ir, definition_func, options):
+    def generate(cls, stencil_id, definition_ir, definition_func, options):
         pass
 
 
@@ -231,11 +232,11 @@ class BaseBackend(Backend):
 
     @classmethod
     def _build(
-        cls, stencil_id, performance_ir, definition_func, generator_options, extra_cache_info
+        cls, stencil_id, implementation_ir, definition_func, generator_options, extra_cache_info
     ):
 
         generator = cls.GENERATOR_CLASS(cls, options=generator_options)
-        module_source = generator(stencil_id, performance_ir)
+        module_source = generator(stencil_id, implementation_ir)
 
         file_name = cls.get_stencil_module_path(stencil_id)
         os.makedirs(os.path.dirname(file_name), exist_ok=True)
@@ -246,10 +247,11 @@ class BaseBackend(Backend):
         return cls._load(stencil_id, definition_func)
 
     @classmethod
-    def build(cls, stencil_id, performance_ir, definition_func, options):
+    def generate(cls, stencil_id, definition_ir, definition_func, options):
         cls._check_options(options)
+        implementation_ir = gt_analysis.transform(definition_ir, options)
         return cls._build(
-            stencil_id, performance_ir, definition_func, copy.deepcopy(options.as_dict()), {}
+            stencil_id, implementation_ir, definition_func, copy.deepcopy(options.as_dict()), {}
         )
 
 
@@ -261,105 +263,7 @@ class BaseGenerator(abc.ABC):
     ORIGIN_ARG_NAME = "_origin_"
     SPLITTERS_NAME = "_splitters_"
 
-    CLASS_TEMPLATE = jinja2.Template(
-        """
-{# ---- Template variables ----
-
-imports, module_members, class_name, class_members, stencil_signature, implementation
-gt_backend, gt_source, gt_domain_info, gt_field_info, gt_parameter_info, gt_constants, gt_default_domain,
-gt_default_origin, gt_options
-
--#}
-import time
-
-import numpy as np
-from numpy import dtype
-{{ imports }}
-
-from gt4py import AccessKind, Boundary, DomainInfo, FieldInfo, ParameterInfo, StencilObject
-
-{{ module_members }}
-
-class {{ class_name }}(StencilObject):
-
-{%- filter indent(width=4) %}
-{{- class_members }}
-{%- endfilter %}
-
-    _gt_backend_ = "{{ gt_backend }}"
-
-    _gt_source_ = {{ gt_source }}
-
-    _gt_domain_info_ = {{ gt_domain_info }}
-
-    _gt_field_info_ = {{ gt_field_info }}
-
-    _gt_parameter_info_ = {{ gt_parameter_info }}
-
-    _gt_constants_ = {{ gt_constants }}
-
-    _gt_options_ = {{ gt_options }}
-
-    @property
-    def backend(self):
-        return type(self)._gt_backend_
-
-    @property
-    def source(self):
-        return type(self)._gt_source_
-
-    @property
-    def domain_info(self):
-        return type(self)._gt_domain_info_
-
-    @property
-    def field_info(self) -> dict:
-        return type(self)._gt_field_info_
-
-    @property
-    def parameter_info(self) -> dict:
-        return type(self)._gt_parameter_info_
-
-    @property
-    def constants(self) -> dict:
-        return type(self)._gt_constants_
-
-    @property
-    def options(self) -> dict:
-        return type(self)._gt_options_
-
-    def __call__(self, {{ stencil_signature }}, domain=None, origin=None, exec_info=None):
-        if exec_info is not None:
-            exec_info["call_start_time"] = time.perf_counter()
-        field_args={{ fields_dict_call }}
-        parameter_args={{ params_dict_call }}
-        # assert that all required values have been provided
-
-{%- filter indent(width=8) %}
-{{synchronization}}
-{%- endfilter %}
-
-        self.call_run(
-            field_args=field_args,
-            parameter_args=parameter_args,
-            domain=domain,
-            origin=origin,
-            exec_info=exec_info
-        )
-
-{%- filter indent(width=8) %}
-{{mark_modified}}
-{%- endfilter %}
-    def run(self, _domain_, _origin_, exec_info, {{ stencil_signature }}):
-        if exec_info is not None:
-            exec_info["domain"] = _domain_
-            exec_info["origin"] = _origin_
-            exec_info["run_start_time"] = time.perf_counter()
-{%- filter indent(width=8) %}
-{{- implementation }}
-{%- endfilter %}
-        """
-    )
+    TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "stencil_module.py.in")
 
     def __init__(self, backend_class, options):
         assert issubclass(backend_class, BaseBackend)
@@ -367,6 +271,8 @@ class {{ class_name }}(StencilObject):
         self.options = types.SimpleNamespace(**options)
         self.stencil_id = None
         self.performance_ir = None
+        with open(self.TEMPLATE_PATH, "r") as f:
+            self.template = jinja2.Template(f.read())
 
     def __call__(self, stencil_id, performance_ir):
         self.stencil_id = stencil_id
@@ -430,7 +336,7 @@ class {{ class_name }}(StencilObject):
                         dtype=performance_ir.parameters[arg.name].data_type.dtype
                     )
                 else:
-                    field_info[arg.name] = None
+                    parameter_info[arg.name] = None
                 params_dict_call.append("{name}={name}".format(name=arg.name))
 
         field_info = repr(field_info)
@@ -457,7 +363,7 @@ class {{ class_name }}(StencilObject):
         class_members = self.generate_class_members()
         implementation = self.generate_implementation()
 
-        module_source = self.CLASS_TEMPLATE.render(
+        module_source = self.template.render(
             imports=imports,
             module_members=module_members,
             class_name=self.stencil_class_name,
