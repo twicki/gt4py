@@ -89,8 +89,12 @@ class {{ class_name }}(StencilObject):
     def __call__(self, {{ stencil_signature }}, domain=None, origin=None, exec_info=None):
         if exec_info is not None:
             exec_info["call_start_time"] = time.perf_counter()
-        field_args={{ fields_dict_call }}
-        parameter_args={{ params_dict_call }}
+        field_args=dict(
+{%- set comma = joiner(", ") -%}{%- for field in field_names -%} {{- comma() }} {{ field }}={{ field }}{%- endfor -%}
+        )
+        parameter_args=dict(
+{%- set comma = joiner(", ") -%}{%- for param in param_names -%} {{- comma() }} {{ param }}={{ param }}{%- endfor -%}
+        )
         # assert that all required values have been provided
 
 {%- filter indent(width=8) %}
@@ -108,7 +112,7 @@ class {{ class_name }}(StencilObject):
 {%- filter indent(width=8) %}
 {{ mark_modified }}
 {%- endfilter %}
-    def run(self, _domain_, _origin_, exec_info, {{ stencil_signature }}):
+    def run(self, _domain_, _origin_, exec_info, *, {{- field_names|join(", ") -}}, {{- param_names|join(", ") -}}):
         if exec_info is not None:
             exec_info["domain"] = _domain_
             exec_info["origin"] = _origin_

@@ -26,7 +26,7 @@ import numpy as np
 
 import dawn4py
 from dawn4py.serialization import SIR
-from dawn4py.serialization import utils as ir_utils
+from dawn4py.serialization import utils as sir_utils
 
 from gt4py import backend as gt_backend
 from gt4py import config as gt_config
@@ -131,10 +131,7 @@ class DawnBaseGenerator(abc.ABC):
         self.externals = externals or {}
 
         field_names = [name for name in field_info.keys()]
-        fields_dict_call = "dict({})".format(", ".join(f"{name}={name}" for name in field_names))
-        params_dict_call = "dict({})".format(
-            ", ".join(f"{name}={name}" for name in parameter_info.keys())
-        )
+        param_names = [name for name in parameter_info.keys()]
 
         domain_info_str = repr(domain_info)
         field_info_str = repr(field_info)
@@ -167,8 +164,8 @@ class DawnBaseGenerator(abc.ABC):
             gt_constants=gt_constants,
             gt_options=gt_options,
             stencil_signature=self.signature,
-            fields_dict_call=fields_dict_call,
-            params_dict_call=params_dict_call,
+            field_names=field_names,
+            param_names=param_names,
             synchronization=self.synchronization_source,
             mark_modified=self.mark_modified_source,
             implementation=self.implementation_source,
@@ -260,13 +257,13 @@ pyext_module = gt_utils.make_module_from_file("{pyext_module_name}", "{pyext_fil
 
         args = []
         for arg in self.api_signature:
-            args.append(arg.name)
+            args.append(f"{arg.name}={arg.name}")
             if arg.name in self.field_info:
-                args.append("list(_origin_['{}'])".format(arg.name))
+                args.append(f"{arg.name}_origin=list(_origin_['{arg.name}'])")
 
         source = """
 # Load or generate a GTComputation object for the current domain size
-pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
+pyext_module.run_computation(domain=list(_domain_), {run_args}, exec_info=exec_info)
 """.format(
             run_args=", ".join(args)
         )
@@ -287,9 +284,155 @@ pyext_module.run_computation(list(_domain_), {run_args}, exec_info)
         return sources.text
 
 
+class SIRConverter(gt_ir.IRNodeVisitor):
+
+    DOMAIN_AXES = gt_definitions.CartesianSpace.names
+
+    @classmethod
+    def apply(cls, definition_ir):
+        return cls()(definition_ir)
+
+    def __call__(self, definition_ir):
+        return self.visit(definition_ir)
+
+    def _make_global_variables(self, parameters: list, externals: dict):
+        global_variables = SIR.GlobalVariableMap()
+
+        for param in parameters:
+            global_variables.map[param.name].is_constexpr = False
+            if param.data_type in [gt_ir.DataType.BOOL]:
+                global_variables.map[param.name].boolean_value = param.init or False
+            elif param.data_type in [
+                gt_ir.DataType.INT8,
+                gt_ir.DataType.INT16,
+                gt_ir.DataType.INT32,
+                gt_ir.DataType.INT64,
+            ]:
+                global_variables.map[param.name].integer_value = param.init or 0
+            elif param.data_type in [gt_ir.DataType.FLOAT32, gt_ir.DataType.FLOAT64]:
+                global_variables.map[param.name].double_value = param.init or 0.0
+
+        # for key, value in externals.items():
+        #     if isinstance(value, numbers.Number):
+        #         global_variables.map[key].is_constexpr = True
+        #         if isinstance(value, bool):
+        #             global_variables.map[key].boolean_value = value
+        #         elif isinstance(value, int):
+        #             global_variables.map[key].integer_value = value
+        #         elif isinstance(value, float):
+        #             global_variables.map[key].double_value = value
+
+        return global_variables
+
+    def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs):
+        assert node.data_type != gt_ir.DataType.INVALID
+        if node.data_type in (gt_ir.DataType.AUTO, gt_ir.DataType.DEFAULT):
+            sir_type = SIR.BuiltinType.type_id = SIR.BuiltinType.Auto
+        elif node.data_type in (
+            gt_ir.DataType.INT8,
+            gt_ir.DataType.INT16,
+            gt_ir.DataType.INT32,
+            gt_ir.DataType.INT64,
+        ):
+            sir_type = SIR.BuiltinType.type_id = SIR.BuiltinType.Integer
+        elif node.data_type in (gt_ir.DataType.FLOAT32, gt_ir.DataType.FLOAT64):
+            sir_type = SIR.BuiltinType.type_id = SIR.BuiltinType.Float
+        return sir_utils.make_literal_access_expr(value=repr(node.value), type=sir_type)
+
+    def visit_VarRef(self, node: gt_ir.VarRef, **kwargs):
+        return sir_utils.make_var_access_expr(name=node.name, is_external=True)
+
+    def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs):
+        offset = [node.offset[ax] for ax in self.DOMAIN_AXES]
+        return sir_utils.make_field_access_expr(name=node.name, offset=offset)
+
+    def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs):
+        left = self.visit(node.lhs)
+        right = self.visit(node.rhs)
+        op = node.op.python_symbol
+        return sir_utils.make_binary_operator(left, op, right)
+
+    def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
+        dimensions = [1 if ax in node.axes else 0 for ax in self.DOMAIN_AXES]
+        return sir_utils.make_field(name=node.name, is_temporary=False, dimensions=dimensions)
+
+    def visit_BlockStmt(self, node: gt_ir.BlockStmt, **kwargs):
+        stmts = [self.visit(stmt) for stmt in node.stmts]
+        return stmts
+
+    def visit_Assign(self, node: gt_ir.Assign, **kwargs):
+        left = self.visit(node.target)
+        right = self.visit(node.value)
+        stmt = sir_utils.make_assignment_stmt(left, right, "=")
+        return stmt
+
+    # def visit_If(self, node: gt_ir.If, **kwargs):
+    #     pass
+
+    def visit_AxisBound(self, node: gt_ir.AxisBound, **kwargs):
+        assert isinstance(node.level, gt_ir.LevelMarker)
+        level = SIR.Interval.Start if node.level == gt_ir.LevelMarker.START else SIR.Interval.End
+        offset = node.offset
+        return level, offset
+
+    def visit_AxisInterval(self, node: gt_ir.AxisInterval, **kwargs):
+        lower_level, lower_offset = self.visit(node.start)
+        upper_level, upper_offset = self.visit(node.end)
+        return sir_utils.make_interval(lower_level, upper_level, lower_offset, upper_offset)
+
+    def visit_ComputationBlock(self, node: gt_ir.ComputationBlock, **kwargs):
+        interval = self.visit(node.interval)
+
+        body_ast = sir_utils.make_ast(self.visit(node.body))
+
+        loop_order = (
+            SIR.VerticalRegion.Backward
+            if node.iteration_order == gt_ir.IterationOrder.BACKWARD
+            else SIR.VerticalRegion.Forward
+        )
+
+        vertical_region_stmt = sir_utils.make_vertical_region_decl_stmt(
+            body_ast, interval, loop_order
+        )
+
+        return vertical_region_stmt
+
+    def visit_StencilDefinition(self, node: gt_ir.StencilDefinition, **kwargs):
+        stencils = []
+        functions = []
+        global_variables = self._make_global_variables(node.parameters, node.externals)
+
+        fields = [self.visit(field) for field in node.api_fields]
+        stencil_ast = sir_utils.make_ast(
+            [self.visit(computation) for computation in node.computations]
+        )
+        name = node.name.split(".")[-1]
+        stencils.append(sir_utils.make_stencil(name=name, ast=stencil_ast, fields=fields))
+
+        sir = sir_utils.make_sir(
+            filename="<gt4py>",
+            stencils=stencils,
+            functions=functions,
+            global_variables=global_variables,
+        )
+        return sir
+
+
+convert_to_SIR = SIRConverter.apply
+
+
 class BaseDawnBackend(gt_backend.BaseBackend):
 
     GENERATOR_CLASS = DawnPythonGenerator
+
+    DATA_TYPE_TO_CPP = {
+        gt_ir.DataType.INT8: "int",
+        gt_ir.DataType.INT16: "int",
+        gt_ir.DataType.INT32: "int",
+        gt_ir.DataType.INT64: "int",
+        gt_ir.DataType.FLOAT32: "double",
+        gt_ir.DataType.FLOAT64: "double",
+    }
 
     GT_BACKEND_OPTS = {
         "verbose": {"versioning": False},
@@ -344,6 +487,7 @@ class BaseDawnBackend(gt_backend.BaseBackend):
 
     @classmethod
     def validate_cache_info(cls, stencil_id, cache_info):
+        # return True
         try:
             assert super(BaseDawnBackend, cls).validate_cache_info(stencil_id, cache_info)
             pyext_md5 = hashlib.md5(open(cache_info["pyext_file_path"], "rb").read()).hexdigest()
@@ -383,37 +527,14 @@ class BaseDawnBackend(gt_backend.BaseBackend):
     @classmethod
     def generate_extension(cls, stencil_id, definition_ir, options):
 
-        interval = ir_utils.make_interval(SIR.Interval.Start, SIR.Interval.End, 0, 0)
+        sir = convert_to_SIR(definition_ir)
+        sir_utils.pprint(sir)
+        print(sir_utils.to_json(sir))
 
-        # create the out = in[i+1] statement
-        body_ast = ir_utils.make_ast(
-            [
-                ir_utils.make_assignment_stmt(
-                    ir_utils.make_field_access_expr("out", [0, 0, 0]),
-                    ir_utils.make_field_access_expr("in", [1, 0, 0]),
-                    "=",
-                )
-            ]
-        )
-
-        vertical_region_stmt = ir_utils.make_vertical_region_decl_stmt(
-            body_ast, interval, SIR.VerticalRegion.Forward
-        )
-
-        stencil_short_name = stencil_id.qualified_name.split(".")[-1]
-        sir = ir_utils.make_sir(
-            "copy_stencil.cpp",
-            [
-                ir_utils.make_stencil(
-                    stencil_short_name,
-                    ir_utils.make_ast([vertical_region_stmt]),
-                    [ir_utils.make_field("in"), ir_utils.make_field("out")],
-                )
-            ],
-        )
+        stencil_short_name = sir.stencils[0].name
 
         # Generate sources
-        source = dawn4py.compile_to_source(sir)
+        source = dawn4py.compile(sir)
         stencil_unique_name = cls.get_pyext_class_name(stencil_id)
         module_name = cls.get_pyext_module_name(stencil_id)
         pyext_sources = {f"_dawn_{stencil_short_name}.hpp": source}
@@ -421,11 +542,26 @@ class BaseDawnBackend(gt_backend.BaseBackend):
         gt_backend = "x86"
 
         arg_fields = [
-            {"name": name, "dtype": "double", "layout_id": i}
-            for i, name in enumerate(["in", "out"])
+            {"name": field.name, "dtype": cls.DATA_TYPE_TO_CPP[field.data_type], "layout_id": i}
+            for i, field in enumerate(definition_ir.api_fields)
         ]
         header_file = "computation.hpp"
         parameters = []
+        for parameter in definition_ir.parameters:
+            if parameter.data_type in [gt_ir.DataType.BOOL]:
+                dtype = "bool"
+            elif parameter.data_type in [
+                gt_ir.DataType.INT8,
+                gt_ir.DataType.INT16,
+                gt_ir.DataType.INT32,
+                gt_ir.DataType.INT64,
+            ]:
+                dtype = "int"
+            elif parameter.data_type in [gt_ir.DataType.FLOAT32, gt_ir.DataType.FLOAT64]:
+                dtype = "double"
+            else:
+                assert False, "Wrong data_type for parameter"
+            parameters.append({"name": parameter.name, "dtype": dtype})
 
         template_args = dict(
             arg_fields=arg_fields,
@@ -458,7 +594,6 @@ class BaseDawnBackend(gt_backend.BaseBackend):
             with open(src_file_name, "w") as f:
                 f.write(source)
 
-        # Build extension module
         pyext_opts = dict(
             verbose=options.backend_opts.pop("verbose", True),
             clean=options.backend_opts.pop("clean", False),

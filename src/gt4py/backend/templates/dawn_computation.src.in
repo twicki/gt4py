@@ -43,8 +43,8 @@ namespace {
 
 using backend_t = gt::backend::{{ gt_backend }};
 
-gridtools::clang::domain make_domain(const std::array<gt::uint_t, 3> &size) {
-    gridtools::clang::domain d{size};
+gridtools::dawn::domain make_domain(const std::array<gt::uint_t, 3> &size) {
+    gridtools::dawn::domain d{size};
     d.set_halos(0, 0, 0, 0, 0, 0);
     return d;
 }
@@ -52,7 +52,7 @@ gridtools::clang::domain make_domain(const std::array<gt::uint_t, 3> &size) {
 using storage_info_t = meta_data_ijk_t;
 using data_store_t = storage_ijk_t;
 static_assert(
-    std::is_same<data_store_t, gridtools::clang::storage_ijk_t>::value,
+    std::is_same<data_store_t, gridtools::dawn::storage_ijk_t>::value,
     "Storage types do not match");
 
 // Constants

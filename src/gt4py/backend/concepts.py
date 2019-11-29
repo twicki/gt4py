@@ -298,9 +298,9 @@ class BaseGenerator(abc.ABC):
         )
 
         field_info = {}
-        fields_dict_call = []
+        field_names = []
         parameter_info = {}
-        params_dict_call = []
+        param_names = []
 
         # Collect access type per field
         out_fields = set()
@@ -329,7 +329,7 @@ class BaseGenerator(abc.ABC):
                     )
                 else:
                     field_info[arg.name] = None
-                fields_dict_call.append("{name}={name}".format(name=arg.name))
+                field_names.append(arg.name)
             else:
                 if arg.name not in performance_ir.unreferenced:
                     parameter_info[arg.name] = gt_definitions.ParameterInfo(
@@ -337,12 +337,10 @@ class BaseGenerator(abc.ABC):
                     )
                 else:
                     parameter_info[arg.name] = None
-                params_dict_call.append("{name}={name}".format(name=arg.name))
+                param_names.append(arg.name)
 
         field_info = repr(field_info)
-        fields_dict_call = "dict({})".format(", ".join(fields_dict_call))
         parameter_info = repr(parameter_info)
-        params_dict_call = "dict({})".format(", ".join(params_dict_call))
 
         if performance_ir.externals:
             gt_constants = {
@@ -376,8 +374,8 @@ class BaseGenerator(abc.ABC):
             gt_constants=gt_constants,
             gt_options=gt_options,
             stencil_signature=stencil_signature,
-            fields_dict_call=fields_dict_call,
-            params_dict_call=params_dict_call,
+            field_names=field_names,
+            param_names=param_names,
             synchronization=self.generate_synchronization(
                 [
                     k

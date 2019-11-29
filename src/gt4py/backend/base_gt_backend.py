@@ -76,7 +76,7 @@ class GTSourceGenerator(gt_ir.IRNodeVisitor):
         gt_ir.BinaryOperator.NE: "!=",
     }
 
-    NATIVE_TYPE_TO_CPP = {
+    DATA_TYPE_TO_CPP = {
         gt_ir.DataType.INT8: "int8_t",
         gt_ir.DataType.INT16: "int16_t",
         gt_ir.DataType.INT32: "int32_t",
@@ -132,18 +132,18 @@ class GTSourceGenerator(gt_ir.IRNodeVisitor):
         return result
 
     def _make_cpp_type(self, data_type: gt_ir.DataType):
-        result = self.NATIVE_TYPE_TO_CPP[data_type]
+        result = self.DATA_TYPE_TO_CPP[data_type]
 
         return result
 
     def _make_cpp_variable(self, decl: gt_ir.VarDecl):
-        result = "{t} {name}:".format(t=self.NATIVE_TYPE_TO_CPP[decl.data_type], name=decl.name)
+        result = "{t} {name}:".format(t=self.DATA_TYPE_TO_CPP[decl.data_type], name=decl.name)
 
         return result
 
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral):
         source = "{dtype}{{{value}}}".format(
-            dtype=self.NATIVE_TYPE_TO_CPP[node.data_type], value=node.value
+            dtype=self.DATA_TYPE_TO_CPP[node.data_type], value=node.value
         )
 
         return source
