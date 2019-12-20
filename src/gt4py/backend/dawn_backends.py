@@ -411,6 +411,7 @@ class SIRConverter(gt_ir.IRNodeVisitor):
 
         sir = sir_utils.make_sir(
             filename="<gt4py>",
+            grid_type=SIR.GridType.Value("Cartesian"),
             stencils=stencils,
             functions=functions,
             global_variables=global_variables,
