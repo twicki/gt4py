@@ -353,8 +353,9 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         return sir_utils.make_binary_operator(left, op, right)
 
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
-        dimensions = [1 if ax in node.axes else 0 for ax in self.DOMAIN_AXES]
-        return sir_utils.make_field(name=node.name, is_temporary=False, dimensions=dimensions)
+        # NOTE Add unstructured support here
+        field_dimensions = sir_utils.make_field_dimensions_cartesian([1 if ax in node.axes else 0 for ax in self.DOMAIN_AXES])
+        return sir_utils.make_field(name=node.name, is_temporary=False, dimensions=field_dimensions)
 
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, **kwargs):
         stmts = [self.visit(stmt) for stmt in node.stmts]
