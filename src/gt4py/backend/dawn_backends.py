@@ -352,6 +352,12 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         op = node.op.python_symbol
         return sir_utils.make_binary_operator(left, op, right)
 
+    def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs):
+        cond = self.visit(node.condition)
+        left = self.visit(node.then_expr)
+        right = self.visit(node.else_expr)
+        return sir_utils.make_ternary_operator(cond, left, right)
+
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
         # NOTE Add unstructured support here
         field_dimensions = sir_utils.make_field_dimensions_cartesian([1 if ax in node.axes else 0 for ax in self.DOMAIN_AXES])
