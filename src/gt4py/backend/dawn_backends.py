@@ -20,6 +20,7 @@ import inspect
 import numbers
 import os
 import types
+import collections
 
 import jinja2
 import json
@@ -297,6 +298,10 @@ class SIRConverter(gt_ir.IRNodeVisitor):
     def __call__(self, definition_ir):
         return self.visit(definition_ir)
 
+    def __init__(self):
+        self.fields_ = collections.OrderedDict()
+        self.in_stencil_ = False
+
     def _make_global_variables(self, parameters: list, externals: dict):
         global_variables = SIR.GlobalVariableMap()
 
@@ -363,7 +368,9 @@ class SIRConverter(gt_ir.IRNodeVisitor):
     def visit_FieldDecl(self, node: gt_ir.FieldDecl, **kwargs):
         # NOTE Add unstructured support here
         field_dimensions = sir_utils.make_field_dimensions_cartesian([1 if ax in node.axes else 0 for ax in self.DOMAIN_AXES])
-        return sir_utils.make_field(name=node.name, dimensions=field_dimensions, is_temporary=False)
+        field = sir_utils.make_field(name=node.name, dimensions=field_dimensions, is_temporary=self.in_stencil_)
+        self.fields_[field.name] = field
+        return field
 
     def visit_BlockStmt(self, node: gt_ir.BlockStmt, **kwargs):
         stmts = [self.visit(stmt) for stmt in node.stmts]
@@ -412,11 +419,17 @@ class SIRConverter(gt_ir.IRNodeVisitor):
         global_variables = self._make_global_variables(node.parameters, node.externals)
 
         fields = [self.visit(field) for field in node.api_fields]
+        self.in_stencil_ = True
         stencil_ast = sir_utils.make_ast(
             [self.visit(computation) for computation in node.computations]
         )
+
         name = node.name.split(".")[-1]
+        fields = list(self.fields_.values())
         stencils.append(sir_utils.make_stencil(name=name, ast=stencil_ast, fields=fields))
+
+        self.fields_.clear()
+        self.in_stencil_ = False
 
         sir = sir_utils.make_sir(
             filename="<gt4py>",
