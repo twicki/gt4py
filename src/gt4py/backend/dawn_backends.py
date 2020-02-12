@@ -23,11 +23,9 @@ import types
 import collections
 
 import jinja2
-import json
 import numpy as np
 
 import dawn4py
-import dawn4py.utils as d4py_utils
 from dawn4py.serialization import SIR
 from dawn4py.serialization import utils as sir_utils
 
@@ -552,14 +550,7 @@ class BaseDawnBackend(gt_backend.BaseBackend):
 
         sir = convert_to_SIR(definition_ir)
         sir_utils.pprint(sir)
-        sir_json = sir_utils.to_json(sir)
-        print(sir_json)
-
-        sir_data = json.loads(sir_json)
-        d4py_utils.convert_sir(sir_data)
-        sir_file = '%s_gt4py.sir' % stencil_id.qualified_name.split('.')[-1]
-        with open(sir_file, 'w') as out_file:
-            json.dump(sir_data, out_file, indent=2)
+        print(sir_utils.to_json(sir))
 
         stencil_short_name = sir.stencils[0].name
 
