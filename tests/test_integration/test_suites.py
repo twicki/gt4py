@@ -26,7 +26,7 @@ CPU_BACKENDS = [name for name in ALL_BACKENDS if "cuda" not in name]
 GPU_BACKENDS = list(set(ALL_BACKENDS) - set(CPU_BACKENDS))
 
 CPU_BACKENDS = ["dawn:gtx86"]
-#CPU_BACKENDS = ["debug", "gtx86"]
+# CPU_BACKENDS = ["debug", "gtx86"]
 
 # ---- Identity stencil ----
 class TestIdentity(gt_testing.StencilTestSuite):
@@ -375,7 +375,7 @@ class TestRuntimeIfFlat(gt_testing.StencilTestSuite):
     domain_range = [(1, 15), (1, 15), (1, 15)]
     backends = CPU_BACKENDS
     symbols = dict(
-        outfield=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
+        outfield=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)])
     )
 
     def definition(outfield):
@@ -399,7 +399,7 @@ class TestRuntimeIfNested(gt_testing.StencilTestSuite):
     domain_range = [(1, 15), (1, 15), (1, 15)]
     backends = CPU_BACKENDS
     symbols = dict(
-        outfield=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)]),
+        outfield=gt_testing.field(in_range=(-10, 10), boundary=[(0, 0), (0, 0), (0, 0)])
     )
 
     def definition(outfield):
