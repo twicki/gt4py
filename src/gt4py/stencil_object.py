@@ -1,8 +1,10 @@
-import sys
 import abc
+import sys
 import time
 import warnings
+
 import numpy as np
+
 import gt4py.backend as gt_backend
 import gt4py.storage as gt_storage
 from gt4py.definitions import (
@@ -276,5 +278,5 @@ class StencilObject(abc.ABC):
                 )
 
         self.run(
-            _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args,
+            _domain_=domain, _origin_=origin, exec_info=exec_info, **field_args, **parameter_args
         )
