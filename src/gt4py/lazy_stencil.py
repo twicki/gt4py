@@ -3,7 +3,7 @@ Stencil Object that allows for deferred building.
 """
 from typing import TYPE_CHECKING, Any, Dict
 
-# from cached_property import cached_property
+from cached_property import cached_property
 
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ class LazyStencil:
     def __init__(self, builder: "StencilBuilder"):
         self.builder = builder
 
-    # @cached_property
+    @cached_property
     def implementation(self) -> "StencilObject":
         """
         The compiled backend-specific python callable which executes the stencil.

@@ -19,11 +19,11 @@ import copy
 import functools
 import numbers
 import os
-import types
+import subprocess as sub
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import jinja2
 import numpy as np
-import subprocess as sub
 
 from gt4py import analysis as gt_analysis
 from gt4py import backend as gt_backend
@@ -33,29 +33,18 @@ from gt4py import utils as gt_utils
 from gt4py.utils import text as gt_text
 
 
-class _MaxKOffsetExtractor(gt_ir.IRNodeVisitor):
-    @classmethod
-    def apply(cls, root_node):
-        return cls()(root_node)
-
-    def __init__(self):
-        self.max_offset = 2
-
-    def __call__(self, node):
-        self.visit(node)
-        return self.max_offset
-
-    def visit_AxisBound(self, node: gt_ir.AxisBound):
-        self.max_offset = max(self.max_offset, abs(node.offset) + 1)
-
-
 class OptExtGenerator(gt_backend.GTPyExtGenerator):
+
+    TEMPLATE_FILES = {
+        "computation.hpp": "new_computation.hpp.in",
+        "computation.src": "new_computation.src.in",
+        "bindings.cpp": "bindings.cpp.in",
+    }
+    COMPUTATION_FILES = ["computation.hpp", "computation.src"]
+    BINDINGS_FILES = ["bindings.cpp"]
+
     OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
     DATA_TYPE_TO_CPP = gt_backend.GTPyExtGenerator.DATA_TYPE_TO_CPP
-
-    TEMPLATE_FILES = copy.deepcopy(gt_backend.GTPyExtGenerator.TEMPLATE_FILES)
-    TEMPLATE_FILES["computation.hpp"] = "new_computation.hpp.in"
-    TEMPLATE_FILES["computation.src"] = "new_computation.src.in"
 
     ITERATORS = ("i", "j", "k")
     BLOCK_SIZES = (32, 8, 1)
@@ -150,8 +139,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         return super().visit_Stage(node)
 
     def visit_StencilImplementation(self, node: gt_ir.StencilImplementation):
-        offset_limit = _MaxKOffsetExtractor.apply(node)
-        k_axis = {"n_intervals": 1, "offset_limit": offset_limit}
         max_extent = functools.reduce(
             lambda a, b: a | b, node.fields_extents.values(), gt_definitions.Extent.zeros()
         )
@@ -253,7 +240,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             constants=constants,
             gt_backend=self.gt_backend_t,
             halo_sizes=halo_sizes,
-            k_axis=k_axis,
             module_name=self.module_name,
             multi_stages=multi_stages,
             parameters=parameters,
@@ -272,6 +258,14 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         sources = {}
         for key, template in self.templates.items():
             sources[key] = self._format_source(template.render(**template_args))
+
+        sources: Dict[str, Dict[str, str]] = {"computation": {}, "bindings": {}}
+        for key, template in self.templates.items():
+            source = self._format_source(template.render(**template_args))
+            if key in self.COMPUTATION_FILES:
+                sources["computation"][key] = source
+            elif key in self.BINDINGS_FILES:
+                sources["bindings"][key] = source
 
         return sources
 

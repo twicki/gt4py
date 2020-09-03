@@ -324,4 +324,6 @@ class StencilObject(abc.ABC):
             call_time = (exec_info["call_run_end_time"] - exec_info["call_run_start_time"]) * 1e3
             stencil_name = str(type(self)).split(".")[-1].rstrip("'>")
             with open("./profile.csv", "a+") as file:
-                file.write("%s,%s,%.18f,%.18f\n" % (stencil_name, self.backend, run_time, call_time))
+                file.write(
+                    "%s,%s,%.18f,%.18f\n" % (stencil_name, self.backend, run_time, call_time)
+                )

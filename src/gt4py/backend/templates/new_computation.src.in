@@ -20,7 +20,6 @@
     - constants: { name:str : str }
     - gt_backend: str
     - halo_sizes: [int]
-    - k_axis: { "n_intervals": int, "offset_limit": int}
     - max_ndim: int
     - multi_stages: [{ "name": str, "exec": str, "interval": [{ "level": str, "offset": int }], "steps": [{
             "stage_name": str,
