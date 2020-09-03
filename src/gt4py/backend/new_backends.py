@@ -58,9 +58,12 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
         return max_extents, max_threads, extra_threads
 
     def _format_source(self, source):
-        proc = sub.run(["clang-format"], stdout=sub.PIPE, input=source, encoding="ascii")
-        if proc.returncode == 0:
-            return proc.stdout
+        try:
+            proc = sub.run(["clang-format"], stdout=sub.PIPE, input=source, encoding="ascii")
+            if proc.returncode == 0:
+                return proc.stdout
+        except FileNotFoundError:
+            pass
         return source
 
     def visit_BinOpExpr(self, node: gt_ir.BinOpExpr):
