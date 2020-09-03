@@ -54,7 +54,7 @@
 
 #include "computation.hpp"
 {%- if "cuda" in gt_backend %}
-#include <algorithm>
+// #include <algorithm>
 {%- endif %}
 {#
 #include <cassert>
@@ -125,32 +125,28 @@ data_store_t<DataType> make_data_store(const BufferInfo& bi,
 template<typename DataType>
 data_store_t<DataType> make_temp_store(const std::array<uint_t, ndim>& domain,
                                        const std::array<uint_t, ndim>& origin) {
-    // Compute dims
-    uint_t data_size = 1;
+    // Compute dims, strides, and size
+    uint_t size = 1;
     std::array<uint_t, ndim> dims{};
-    for(uint_t i = 0; i < ndim; ++i) {
-      dims[i] = domain[i] + 2 * origin[i];
-      data_size *= dims[i];
-    }
-
-    // Compute strides and offset
-    uint_t stride = 1;
     std::array<uint_t, ndim> strides{};
     for(int i = ndim - 1; i >= 0; --i) {
-      strides[i] = stride;
-      stride *= dims[i];
+      dims[i] = domain[i] + 2 * origin[i];
+      strides[i] = size;
+      size *= dims[i];
     }
 
 {%- if "cuda" in gt_backend %}
     // Reverse stride array...
-    std::reverse(std::begin(strides), std::end(strides));
+    // TODO: Reversing stride array resulted in out of bounds memory acccesses
+    //   in XPPM/YPPM stencils, look at strides in GPUStorage to debug...
+    // std::reverse(std::begin(strides), std::end(strides));
 {%- endif %}
-    // Allocate pointer and shift by halo offset...
+    // Allocate pointer
 {%- if "cuda" in gt_backend %}
     DataType* ptr;
-    cudaMalloc((void**) &ptr, data_size * sizeof(DataType));
+    cudaMalloc((void**) &ptr, size * sizeof(DataType));
 {%- else %}
-    DataType* ptr = new DataType[data_size];
+    DataType* ptr = new DataType[size];
 {%- endif %}
 
     return data_store_t<DataType>{dims, strides, ptr};
@@ -293,8 +289,10 @@ void run(const std::array<uint_t, ndim>& domain,
     const uint_t k_block_size = 1;
     {%- endif %}
 
-    dim3 gdim(i_block_size, j_block_size, k_block_size);
-    dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
+    // dim3 gdim(i_block_size, j_block_size, k_block_size);
+    // dim3 bdim({{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
+    dim3 gdim(1, 1, 1);
+    dim3 bdim(1, 1, 1);
     {%- if debug %}
     printf("DEBUG: gdim = (%d,%d,%d)\n", i_block_size, j_block_size, k_block_size);
     printf("DEBUG: bdim = (%d,%d,%d)\n", {{ block_sizes[0] }}, {{ block_sizes[1] }} + {{ extra_threads }}, 1);
