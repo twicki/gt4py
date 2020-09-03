@@ -14,23 +14,13 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import abc
-import copy
 import functools
-import numbers
-import os
 import subprocess as sub
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Dict, List
 
-import jinja2
-import numpy as np
-
-from gt4py import analysis as gt_analysis
 from gt4py import backend as gt_backend
 from gt4py import definitions as gt_definitions
 from gt4py import ir as gt_ir
-from gt4py import utils as gt_utils
-from gt4py.utils import text as gt_text
 
 
 class OptExtGenerator(gt_backend.GTPyExtGenerator):
@@ -42,9 +32,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
     }
     COMPUTATION_FILES = ["computation.hpp", "computation.src"]
     BINDINGS_FILES = ["bindings.cpp"]
-
-    OP_TO_CPP = gt_backend.GTPyExtGenerator.OP_TO_CPP
-    DATA_TYPE_TO_CPP = gt_backend.GTPyExtGenerator.DATA_TYPE_TO_CPP
 
     ITERATORS = ("i", "j", "k")
     BLOCK_SIZES = (32, 8, 1)
@@ -180,8 +167,9 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
 
         multi_stages = []
         for multi_stage in node.multi_stages:
-            steps = []
-            last_interval = []
+            steps: List[Dict[str, Any]] = []
+            last_interval: List[Dict[str, Any]] = []
+
             n_multi_stages = 0
             for group in multi_stage.groups:
                 for stage in group.stages:
@@ -207,10 +195,10 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
                             }
                         )
                         n_multi_stages += 1
-                        steps = []
+                        steps.clear()
                     last_interval = interval
 
-                    extents = []
+                    extents: List[int] = []
                     compute_extent = stage.compute_extent
                     for i in range(compute_extent.ndims):
                         extents.extend(
@@ -255,10 +243,6 @@ class OptExtGenerator(gt_backend.GTPyExtGenerator):
             debug=False,
         )
 
-        sources = {}
-        for key, template in self.templates.items():
-            sources[key] = self._format_source(template.render(**template_args))
-
         sources: Dict[str, Dict[str, str]] = {"computation": {}, "bindings": {}}
         for key, template in self.templates.items():
             source = self._format_source(template.render(**template_args))
@@ -275,17 +259,11 @@ class CXXOptBackend(gt_backend.GTX86Backend):
     PYEXT_GENERATOR_CLASS = OptExtGenerator
     GT_BACKEND_T = "x86"
     _CPU_ARCHITECTURE = GT_BACKEND_T
-
     name = "cxxopt"
-    options = gt_backend.BaseGTBackend.GT_BACKEND_OPTS
-    storage_info = gt_backend.GTX86Backend.storage_info
 
 
 @gt_backend.register
 class CUDABackend(gt_backend.GTCUDABackend):
     PYEXT_GENERATOR_CLASS = OptExtGenerator
     GT_BACKEND_T = "cuda"
-
     name = "cuda"
-    options = gt_backend.BaseGTBackend.GT_BACKEND_OPTS
-    storage_info = gt_backend.GTCUDABackend.storage_info
