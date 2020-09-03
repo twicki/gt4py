@@ -113,7 +113,7 @@ class {{ class_name }}(StencilObject):
         return type(self)._gt_options_
 
     def __call__(
-        self, {{ stencil_signature }}, domain=None, origin=None, validate_args=False, exec_info={}
+        self, {{ stencil_signature }}, domain=None, origin=None, validate_args=True, exec_info=None
     ):
         if exec_info is not None:
             exec_info["call_start_time"] = time.perf_counter()
