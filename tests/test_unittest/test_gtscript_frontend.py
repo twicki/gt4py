@@ -823,3 +823,28 @@ class TestRegions:
             gt_frontend.GTScriptSyntaxError, match="Invalid 'computation' specification"
         ):
             compile_definition(stencil, "stencil", module, externals=externals)
+
+
+class TestParallelComputations:
+    def test_horizontal_race_condition(self):
+        module = f"TestParallelComputations_test_race_condition_{id_version}"
+        externals = {}
+
+        with pytest.warns(
+            Warning,
+            match="Horizontal race condition detected in stencil",
+        ):
+
+            @gtscript.stencil(backend="debug")
+            def func_err(in_field: gtscript.Field[np.float_]):
+                with computation(PARALLEL), interval(...):
+                    tmp = in_field
+                    in_field = tmp[1, 0, 0]
+
+        @gtscript.stencil(backend="debug")
+        def func(in_field: gtscript.Field[np.float_]):
+            with computation(FORWARD), interval(...):
+                tmp = in_field
+                in_field = tmp[1, 0, 0]
+
+        # The vertical race condition is already fixed.

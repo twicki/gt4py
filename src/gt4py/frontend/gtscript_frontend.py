@@ -23,6 +23,7 @@ import numbers
 import types
 from typing import List
 
+import networkx as nx
 import numpy as np
 
 from gt4py import definitions as gt_definitions
