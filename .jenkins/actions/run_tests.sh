@@ -13,4 +13,4 @@ git clone https://github.com/VulcanClimateModeling/gt4py.git gt4py
 pip3 install cupy-cuda101==7.7.0
 pip3 install --no-cache-dir -e gt4py[cupy-cuda101]
 python3 -m gt4py.gt_src_manager install
-python3 -m pytest gt4py
+python3 -m pytest -x gt4py
