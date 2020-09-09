@@ -10,7 +10,7 @@
 
 ### Some environment variables available from Jenkins
 ### Note: for a complete list see https://jenkins.ginko.ch/env-vars.html
-# host_machine              The name of the build host (daint, kesch, ...).
+# slave              The name of the build host (daint, kesch, ...).
 # BUILD_NUMBER       The current bild number, such as "153".
 # BUILD_ID           The current build id, such as "2005-08-22_23-59-59" (YYYY-MM-DD_hh-mm-ss).
 # BUILD_DISPLAY_NAME The display name of the current build, something like "#153" by default.
@@ -37,7 +37,7 @@ T="$(date +%s)"
 
 # check sanity of environment
 test -n "$1" || exitError 1001 ${LINENO} "must pass an argument"
-test -n "${host_machine}" || exitError 1005 ${LINENO} "host_machine is not defined"
+test -n "${slave}" || exitError 1005 ${LINENO} "slave is not defined"
 
 # some global variables
 action="$1"
