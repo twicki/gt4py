@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 module load /project/d107/install/modulefiles/boost/1_74_0
-source /etc/profile
-if [ -f /etc/profile ]; then
-    source /etc/profile
-fi
 python3 -m pip install --user virtualenv
 python3 -m venv gt4pyenv
 source gt4pyenv/bin/activate
