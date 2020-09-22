@@ -24,11 +24,11 @@ from gt4py.analysis import TransformData
 
 from .passes import (
     BuildIIRPass,
-    CleanUpPass,
     ComputeExtentsPass,
     ComputeUsedSymbolsPass,
     DataTypePass,
     DemoteLocalTemporariesToVariablesPass,
+    HousekeepingPass,
     InitInfoPass,
     MergeBlocksPass,
     NormalizeBlocksPass,
@@ -122,8 +122,8 @@ class IRTransformer:
         demote_local_temporaries_to_variables_pass.apply(self.transform_data)
 
         # prune some stages that don't have effect
-        cleanup_pass = CleanUpPass()
-        cleanup_pass.apply(self.transform_data)
+        housekeeping_pass = HousekeepingPass()
+        housekeeping_pass.apply(self.transform_data)
 
         # Run verifications on the implementation IR
         ParallelRaceConditionChecker.apply(self.transform_data.implementation_ir)

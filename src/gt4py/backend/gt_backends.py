@@ -396,7 +396,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
     def visit_Stage(self, node: gt_ir.Stage) -> Dict[str, Any]:
         # Initialize symbols for the generation of references in this stage
-        # self.stage_symbols = dict(node.local_symbols)
         self.stage_symbols = {}
         args = []
         for accessor in node.accessors:
@@ -538,7 +537,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
 
         pyext_module_name: Optional[str]
         pyext_file_path: Optional[str]
-        if implementation_ir.multi_stages:
+        if implementation_ir.has_effect:
             pyext_module_name, pyext_file_path = self.generate_extension()
         else:
             # if computation has no effect, there is no need to create an extension
