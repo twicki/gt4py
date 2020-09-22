@@ -555,18 +555,19 @@ class TemporaryFieldCollector(ast.NodeVisitor):
     def __init__(
         self, fields: dict, parameters: dict, local_symbols: dict,
     ):
-        fields = fields or {}
-        parameters = parameters or {}
-        assert all(isinstance(name, str) for name in parameters.keys())
-        local_symbols = local_symbols or {}
-        assert all(isinstance(name, str) for name in local_symbols.keys()) and all(
-            isinstance(value, (type, np.dtype)) for value in local_symbols.values()
+        self.fields = fields or {}
+        self.parameters = parameters or {}
+        assert all(isinstance(name, str) for name in self.parameters.keys())
+        self.local_symbols = local_symbols or {}
+        assert all(isinstance(name, str) for name in self.local_symbols.keys()) and all(
+            isinstance(value, (type, np.dtype)) for value in self.local_symbols.values()
         )
 
-        self.fields = fields
-        self.parameters = parameters
-        self.local_symbols = local_symbols
-        self.new_fields = {}
+    @classmethod
+    def apply(cls, node: gt_ir.If, fields: dict, parameters: dict, local_symbols: dict):
+        assert isinstance(node, ast.If)
+        collector = cls(fields, parameters, local_symbols)
+        return collector.visit(node)
 
     # Helpers functions
     def _is_field(self, name: str):
@@ -983,8 +984,9 @@ class IRMaker(ast.NodeVisitor):
 
         result = []
         # collect all the temporaries used inside the if-statement
-        collector = TemporaryFieldCollector(self.fields, self.parameters, self.local_symbols)
-        temporaries = collector.visit(node)
+        temporaries = TemporaryFieldCollector.apply(
+            node, self.fields, self.parameters, self.local_symbols
+        )
         for field_decl in temporaries:
             self.fields[field_decl.name] = field_decl
             result.append(field_decl)
