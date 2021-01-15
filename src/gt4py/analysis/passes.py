@@ -878,6 +878,94 @@ class ComputeExtentsPass(TransformPass):
         }
 
 
+class RemoveUnreachedBlocksPass(TransformPass):
+    """Remove unused IJBlockInfos.
+
+    This happens because they have a parallel interval and are not executed."""
+
+    @classmethod
+    def apply(cls, transform_data: TransformData) -> None:
+        seq_axis = transform_data.definition_ir.domain.index(
+            transform_data.definition_ir.domain.sequential_axis
+        )
+        for dom_block in transform_data.blocks:
+            dom_block.ij_blocks = [
+                block
+                for block in dom_block.ij_blocks
+                if compute_extent_diff(block, seq_axis) is not None
+            ]
+
+
+class ChangeIterationOrderPass(TransformPass):
+    """Changes PARALLEL blocks to be forward or backward in order to allow for more aggressive fusion. """
+
+    @staticmethod
+    def blocks_are_compatible(
+        this_block: DomainBlockInfo, next_block: DomainBlockInfo, transform_data: TransformData
+    ) -> bool:
+        this_block = MultiStageMergingWrapper(this_block, transform_data)
+        next_block = MultiStageMergingWrapper(next_block, transform_data)
+        if this_block.parent != next_block.parent:
+            return False
+        if next_block.has_disallowed_read_after_write_in(this_block):
+            return False
+        if next_block.has_disallowed_write_after_read_in(this_block):
+            return False
+        return True
+
+    @classmethod
+    def apply(cls, transform_data: TransformData) -> None:
+        # forward sweep
+        for i in range(0, len(transform_data.blocks)):
+            current_block = transform_data.blocks[i]
+            if current_block.iteration_order == gt_ir.IterationOrder.PARALLEL:
+                # find surrounding orders if they are compatible
+                available_order = set()
+                if i < len(transform_data.blocks) - 1:
+                    if cls.blocks_are_compatible(
+                        current_block, transform_data.blocks[i + 1], transform_data
+                    ):
+                        available_order.add(transform_data.blocks[i + 1].iteration_order)
+                if i > 0:
+                    if cls.blocks_are_compatible(
+                        transform_data.blocks[i - 1], current_block, transform_data
+                    ):
+                        available_order.add(transform_data.blocks[i - 1].iteration_order)
+                if len(available_order) == 1:
+                    current_block.iteration_order = available_order.pop()
+                else:
+                    available_order.discard(gt_ir.IterationOrder.PARALLEL)
+                    # TODO: now we might still have two, how to pick?
+                    current_block.iteration_order = available_order.pop()
+
+        # backward sweep
+        for i in range(
+            len(transform_data.blocks)-1,
+            -1,
+            -1,
+        ):
+            current_block = transform_data.blocks[i]
+            if current_block.iteration_order == gt_ir.IterationOrder.PARALLEL:
+                # find surrounding orders if they are compatible
+                available_order = set()
+                if i < len(transform_data.blocks) - 1:
+                    if cls.blocks_are_compatible(
+                        current_block, transform_data.blocks[i + 1], transform_data
+                    ):
+                        available_order.add(transform_data.blocks[i + 1].iteration_order)
+                if i > 0:
+                    if cls.blocks_are_compatible(
+                        transform_data.blocks[i - 1], current_block, transform_data
+                    ):
+                        available_order.add(transform_data.blocks[i - 1].iteration_order)
+                if len(available_order) == 1:
+                    current_block.iteration_order = available_order.pop()
+                else:
+                    available_order.discard(gt_ir.IterationOrder.PARALLEL)
+                    # TODO: now we might still have two, how to pick?
+                    current_block.iteration_order = available_order.pop()
+
+
 class DataTypePass(TransformPass):
     """Fills in the concrete data_type for all set to `DataType.AUTO`"""
 

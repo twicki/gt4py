@@ -24,6 +24,7 @@ from gt4py.analysis import TransformData
 
 from .passes import (
     BuildIIRPass,
+    ChangeIterationOrderPass,
     ComputeExtentsPass,
     ComputeUsedSymbolsPass,
     DataTypePass,
@@ -94,6 +95,9 @@ class IRTransformer:
 
         # Compute stage extents
         ComputeExtentsPass.apply(self.transform_data)
+
+        # Change parallel blocks to forward or backward to enable fusion
+        ChangeIterationOrderPass.apply(self.transform_data)
 
         # Merge compatible blocks
         MergeBlocksPass.apply(self.transform_data)
