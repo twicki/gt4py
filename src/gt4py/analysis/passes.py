@@ -940,7 +940,7 @@ class ChangeIterationOrderPass(TransformPass):
 
         # backward sweep
         for i in range(
-            len(transform_data.blocks)-1,
+            len(transform_data.blocks) - 1,
             -1,
             -1,
         ):
@@ -1301,9 +1301,9 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
             self.generic_visit(node, **kwargs)
 
         def visit_Assign(self, node: gt_ir.Assign, **kwargs: Any) -> None:
+            self.visit(node.value, **kwargs)
             if node.target.name in self.demotables:
                 self.demotables[node.target.name] = kwargs["stage_name"]
-            self.visit(node.value, **kwargs)
 
         def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs: Any) -> None:
             field_name = node.name

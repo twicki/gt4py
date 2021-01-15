@@ -97,7 +97,7 @@ class IRTransformer:
         ComputeExtentsPass.apply(self.transform_data)
 
         # Change parallel blocks to forward or backward to enable fusion
-        ChangeIterationOrderPass.apply(self.transform_data)
+        #  ChangeIterationOrderPass.apply(self.transform_data)
 
         # Merge compatible blocks
         MergeBlocksPass.apply(self.transform_data)
