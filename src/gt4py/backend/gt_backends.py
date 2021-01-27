@@ -54,9 +54,10 @@ def make_x86_layout_map(mask: Tuple[int, ...]) -> Tuple[Optional[int], ...]:
 def x86_is_compatible_layout(field: "Storage") -> bool:
     stride = 0
     layout_map = make_x86_layout_map(field.mask)
-    if len(field.strides) < len(layout_map):
+    flattened_layout = [index for index in layout_map if index is not None]
+    if len(field.strides) < len(flattened_layout):
         return False
-    for dim in reversed(np.argsort(layout_map)):
+    for dim in reversed(np.argsort(flattened_layout)):
         if field.strides[dim] < stride:
             return False
         stride = field.strides[dim]
@@ -89,9 +90,10 @@ def make_mc_layout_map(mask: Tuple[int, ...]) -> Tuple[Optional[int], ...]:
 def mc_is_compatible_layout(field: "Storage") -> bool:
     stride = 0
     layout_map = make_mc_layout_map(field.mask)
-    if len(field.strides) < len(layout_map):
+    flattened_layout = [index for index in layout_map if index is not None]
+    if len(field.strides) < len(flattened_layout):
         return False
-    for dim in reversed(np.argsort(layout_map)):
+    for dim in reversed(np.argsort(flattened_layout)):
         if field.strides[dim] < stride:
             return False
         stride = field.strides[dim]
@@ -106,9 +108,10 @@ def cuda_layout(mask: Tuple[int, ...]) -> Tuple[Optional[int], ...]:
 def cuda_is_compatible_layout(field: "Storage") -> bool:
     stride = 0
     layout_map = cuda_layout(field.mask)
-    if len(field.strides) < len(layout_map):
+    flattened_layout = [index for index in layout_map if index is not None]
+    if len(field.strides) < len(flattened_layout):
         return False
-    for dim in reversed(np.argsort(layout_map)):
+    for dim in reversed(np.argsort(flattened_layout)):
         if field.strides[dim] < stride:
             return False
         stride = field.strides[dim]
@@ -395,6 +398,21 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return (start_splitter, start_offset), (end_splitter, end_offset)
 
+    def _parallel_interval_condition(self, parallel_interval: List[gt_ir.AxisInterval]) -> str:
+        defs = []
+        for interval, axis_name in zip(parallel_interval, self.impl_node.domain.par_axes_names):
+            index = f"eval.{axis_name.lower()}()"
+            for axis_bound, oper in zip((interval.start, interval.end), (">=", "<")):
+                if not axis_bound.extend:
+                    relative_offset = (
+                        "0"
+                        if axis_bound.level == gt_ir.LevelMarker.START
+                        else f"static_cast<gt::int_t>(eval(domain_size_{axis_name.upper()}()))"
+                    )
+                    defs.append(f"{index} {oper} {relative_offset}{axis_bound.offset:+d}")
+
+        return " && ".join(defs)
+
     def visit_ApplyBlock(
         self, node: gt_ir.ApplyBlock
     ) -> Tuple[Tuple[Tuple[int, int], Tuple[int, int]], str]:
@@ -427,6 +445,17 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 arg["extent"] = gt_utils.flatten(accessor.extent)
             args.append(arg)
 
+        if node.parallel_interval:
+            conditional = self._parallel_interval_condition(node.parallel_interval)
+            args.extend(
+                [
+                    {"name": f"domain_size_{name}", "access_type": "in", "extent": None}
+                    for name in self.domain.axes_names
+                ]
+            )
+        else:
+            conditional = ""
+
         # Create regions and computations
         regions = []
         for apply_block in node.apply_blocks:
@@ -435,12 +464,49 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 {
                     "interval_start": interval_definition[0],
                     "interval_end": interval_definition[1],
+                    "entry_conditional": conditional,
                     "body": body_sources,
                 }
             )
-        functor_content = {"args": args, "regions": regions}
 
+        functor_content = {"args": args, "regions": regions}
         return functor_content
+
+    def _get_fields(
+        self, node: gt_ir.StencilImplementation
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Collect field attributes for API arguments and temporary fields.
+
+        Returns
+        -------
+            `arg_fields`: List of field attributes for stencil arguments.
+            `tmp_fields`: List of field attributes for temporaries.
+        """
+        arg_fields = []
+        tmp_fields = []
+        storage_ids = []
+        max_ndim = 0
+        for name, field_decl in node.fields.items():
+            if name not in node.unreferenced:
+                max_ndim = max(max_ndim, len(field_decl.axes))
+                field_attributes = {
+                    "name": field_decl.name,
+                    "dtype": self._make_cpp_type(field_decl.data_type),
+                    "naxes": len(field_decl.axes),
+                    "axes": field_decl.axes,
+                    "selector": tuple(
+                        axis in field_decl.axes for axis in self.impl_node.domain.axes_names
+                    ),
+                }
+                if field_decl.is_api:
+                    if field_decl.layout_id not in storage_ids:
+                        storage_ids.append(field_decl.layout_id)
+                    field_attributes["layout_id"] = storage_ids.index(field_decl.layout_id)
+                    arg_fields.append(field_attributes)
+                else:
+                    tmp_fields.append(field_attributes)
+
+        return arg_fields, tmp_fields
 
     def visit_StencilImplementation(
         self, node: gt_ir.StencilImplementation
@@ -458,24 +524,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                 if value is not None:
                     constants[name] = value
 
-        arg_fields = []
-        tmp_fields = []
-        storage_ids = []
-        max_ndim = 0
-        for name, field_decl in node.fields.items():
-            if name not in node.unreferenced:
-                max_ndim = max(max_ndim, len(field_decl.axes))
-                field_attributes = {
-                    "name": field_decl.name,
-                    "dtype": self._make_cpp_type(field_decl.data_type),
-                }
-                if field_decl.is_api:
-                    if field_decl.layout_id not in storage_ids:
-                        storage_ids.append(field_decl.layout_id)
-                    field_attributes["layout_id"] = storage_ids.index(field_decl.layout_id)
-                    arg_fields.append(field_attributes)
-                else:
-                    tmp_fields.append(field_attributes)
+        arg_fields, tmp_fields = self._get_fields(node)
 
         parameters = [
             {"name": parameter.name, "dtype": self._make_cpp_type(parameter.data_type)}
@@ -483,10 +532,13 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             if name not in node.unreferenced
         ]
 
+        requires_positional = False
         stage_functors = {}
         for multi_stage in node.multi_stages:
             for group in multi_stage.groups:
                 for stage in group.stages:
+                    if stage.parallel_interval is not None:
+                        requires_positional = True
                     stage_functors[stage.name] = self.visit(stage)
 
         multi_stages = []
@@ -501,6 +553,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
+            requires_positional=requires_positional,
             multi_stages=multi_stages,
             parameters=parameters,
             stage_functors=stage_functors,

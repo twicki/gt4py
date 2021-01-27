@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 import numpy as np
 
@@ -62,6 +62,24 @@ class DebugSourceGenerator(PythonSourceGenerator):
 
         return source_lines
 
+    def make_positional_condition(self, parallel_interval: List[gt_ir.AxisInterval]):
+        conditions = []
+        for d, (interval, axis_name) in enumerate(
+            zip(parallel_interval, self.impl_node.domain.par_axes_names)
+        ):
+            for axis_bound, symbol in zip((interval.start, interval.end), (">=", "<")):
+                if not axis_bound.extend:
+                    relative_offset = (
+                        "0"
+                        if axis_bound.level == gt_ir.LevelMarker.START
+                        else f"{self.domain_arg_name}[{d}]"
+                    )
+                    conditions.append(
+                        f"{axis_name} {symbol} {relative_offset}{axis_bound.offset:+d}"
+                    )
+
+        return [f"if {' and '.join(conditions)}:"]
+
     def make_temporary_field(self, name: str, dtype: gt_ir.DataType, extent: gt_definitions.Extent):
         source_lines = super().make_temporary_field(name, dtype, extent)
         source_lines.extend(self._make_field_accessor(name, extent.to_boundary().lower_indices))
@@ -70,52 +88,58 @@ class DebugSourceGenerator(PythonSourceGenerator):
 
     def make_stage_source(self, iteration_order: gt_ir.IterationOrder, regions: list):
         extent = self.block_info.extent
+        parallel_interval = self.block_info.parallel_interval
         lower_extent = extent.lower_indices
         upper_extent = extent.upper_indices
-        seq_axis_name = self.impl_node.domain.sequential_axis.name
-        axes_names = self.impl_node.domain.axes_names
+        # seq_axis_name = self.impl_node.domain.sequential_axis.name
 
         # Create IJ for-loops
-        ij_loop_lines = []
-        for d in range(extent.ndims):
-            axis_name = axes_names[d]
-            if axis_name != seq_axis_name:
-                i = d + 1
-                start_expr = "{:+d}".format(lower_extent[d]) if lower_extent[d] != 0 else ""
-                size_expr = "{dom}[{d}]".format(dom=self.domain_arg_name, d=d)
-                size_expr += " {:+d}".format(upper_extent[d]) if upper_extent[d] != 0 else ""
-                range_expr = "range({args})".format(
-                    args=", ".join(a for a in (start_expr, size_expr, "") if a)
-                )
-                ij_loop_lines.append(
-                    " " * self.indent_size * i
-                    + "for {ax} in {range_expr}:".format(ax=axis_name, range_expr=range_expr)
-                )
+        ij_loop_lines = gt_text.TextBlock(indent_size=self.indent_size)
+        for d, axis_name in enumerate(self.impl_node.domain.par_axes_names):
+            start_expr = "{:+d}".format(lower_extent[d]) if lower_extent[d] != 0 else ""
+            size_expr = "{dom}[{d}]".format(dom=self.domain_arg_name, d=d)
+            size_expr += " {:+d}".format(upper_extent[d]) if upper_extent[d] != 0 else ""
+            args = ", ".join(a for a in (start_expr, size_expr, "") if a)
+            ij_loop_lines.append(f"for {axis_name} in range({args}):", indent_steps=d)
 
         # Create K for-loop: computation body is split in different vertical regions
-        source_lines = []
-        assert sorted(regions, reverse=iteration_order == gt_ir.IterationOrder.BACKWARD) == regions
+        source_lines = gt_text.TextBlock(indent_size=self.indent_size)
+        assert (
+            sorted(
+                regions,
+                key=lambda region: region[0],
+                reverse=iteration_order == gt_ir.IterationOrder.BACKWARD,
+            )
+            == regions
+        )
 
         for bounds, body_sources in regions:
-            region_lines = self._make_regional_computation(iteration_order, bounds)
-            source_lines.extend(region_lines)
-            source_lines.extend(ij_loop_lines)
-            source_lines.extend(
-                " " * self.indent_size * extent.ndims + line for line in body_sources
-            )
+            source_lines.extend(self._make_regional_computation(iteration_order, bounds))
+            with source_lines.indented(steps=1):
+                source_lines.extend(ij_loop_lines.text)
 
-        return source_lines
+            if parallel_interval:
+                with source_lines.indented(steps=extent.ndims):
+                    source_lines.extend(self.make_positional_condition(parallel_interval))
+                with source_lines.indented(steps=extent.ndims + 1):
+                    source_lines.extend(body_sources)
+            else:
+                with source_lines.indented(steps=extent.ndims):
+                    source_lines.extend(body_sources)
+
+        return source_lines.text
 
     # ---- Visitor handlers ----
     def visit_FieldRef(self, node: gt_ir.FieldRef):
         assert node.name in self.block_info.accessors
         index = []
-        for ax in self.domain.axes_names:
+        for ax in self.impl_node.fields[node.name].axes:
             offset = "{:+d}".format(node.offset[ax]) if ax in node.offset else ""
             index.append("{ax}{offset}".format(ax=ax, offset=offset))
 
+        index_str = f"({index[0]},)" if len(index) == 1 else ", ".join(index)
         source = "{name}{marker}[{index}]".format(
-            marker=self.origin_marker, name=node.name, index=", ".join(index)
+            marker=self.origin_marker, name=node.name, index=index_str
         )
 
         return source

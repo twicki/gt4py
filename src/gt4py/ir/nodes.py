@@ -114,17 +114,21 @@ storing a reference to the piece of source code which originated the node.
                 | If(condition: expr, main_body: BlockStmt, else_body: BlockStmt)
                 | BlockStmt
 
-    AxisBound(level: LevelMarker | VarRef, offset: int)
+    AxisBound(level: LevelMarker | VarRef, offset: int, extend: bool = False)
         # bound = level + offset
         # level: LevelMarker = special START or END level
         # level: VarRef = access to `int` or `[int]` variable holding the run-time value of the level
         # offset: int
+        # extend = True means extend infinitely far
 
     AxisInterval(start: AxisBound, end: AxisBound)
         # start is included
         # end is excluded
 
-    ComputationBlock(interval: AxisInterval, iteration_order: IterationOrder, body: BlockStmt)
+    ComputationBlock(interval: AxisInterval,
+                     [parallel_interval: List[AxisInterval],]
+                     iteration_order: IterationOrder,
+                     body: BlockStmt)
 
     ArgumentInfo(name: str, is_keyword: bool, [default: Any])
 
@@ -152,7 +156,8 @@ Implementation IR
     Stage(name: str,
           accessors: List[Accessor],
           apply_blocks: List[ApplyBlock],
-          compute_extent: Extent)
+          compute_extent: Extent,
+          [parallel_interval: List[AxisInterval]])
 
     StageGroup(stages: List[Stage])
 
@@ -174,7 +179,7 @@ import collections
 import copy
 import enum
 import operator
-from typing import List
+from typing import List, Sequence
 
 import numpy as np
 
@@ -244,6 +249,10 @@ class Domain(Node):
     @property
     def axes_names(self):
         return [ax.name for ax in self.axes]
+
+    @property
+    def par_axes_names(self):
+        return [axis.name for axis in self.parallel_axes]
 
     @property
     def ndims(self):
@@ -395,6 +404,10 @@ class FieldRef(Ref):
     name = attribute(of=str)
     offset = attribute(of=DictOf[str, int])
     loc = attribute(of=Location, optional=True)
+
+    @classmethod
+    def at_center(cls, name: str, axes: Sequence[str], loc=None):
+        return cls(name=name, offset={axis: 0 for axis in axes}, loc=loc)
 
 
 @attribclass
@@ -684,6 +697,7 @@ class IterationOrder(enum.Enum):
 class AxisBound(Node):
     level = attribute(of=UnionOf[LevelMarker, VarRef])
     offset = attribute(of=int, default=0)
+    extend = attribute(of=bool, default=False)
     loc = attribute(of=Location, optional=True)
 
 
@@ -712,6 +726,7 @@ class AxisInterval(Node):
 @attribclass
 class ComputationBlock(Node):
     interval = attribute(of=AxisInterval)
+    parallel_interval = attribute(of=ListOf[AxisInterval], optional=True)
     iteration_order = attribute(of=IterationOrder)
     body = attribute(of=BlockStmt)
     loc = attribute(of=Location, optional=True)
@@ -772,6 +787,7 @@ class Stage(IIRNode):
     accessors = attribute(of=ListOf[Accessor])
     apply_blocks = attribute(of=ListOf[ApplyBlock])
     compute_extent = attribute(of=Extent)
+    parallel_interval = attribute(of=ListOf[AxisInterval], optional=True)
 
 
 # @enum.unique
