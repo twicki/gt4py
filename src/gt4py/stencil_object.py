@@ -143,7 +143,7 @@ class StencilObject(abc.ABC):
         large_val = np.iinfo(np.uintc).max
         max_domain = Shape([large_val] * self.domain_info.ndims)
         for name, field in field_args.items():
-            storage_mask = field.mask
+            storage_mask = list(field.mask)
             api_mask = self._get_field_mask(name)
             if storage_mask != api_mask:
                 raise ValueError(
@@ -190,7 +190,8 @@ class StencilObject(abc.ABC):
                 )
 
             field_mask = self._get_field_mask(name)
-            if field.mask != field_mask:
+            storage_mask = list(field.mask)
+            if storage_mask != field_mask:
                 raise ValueError(
                     f"The storage for '{name}' has mask '{field.mask}', but the API signature expects '{field_mask}'"
                 )
