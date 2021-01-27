@@ -2,7 +2,7 @@
 #
 # GT4Py - GridTools4Py - GridTools for Python
 #
-# Copyright (c) 2014-2020, ETH Zurich
+# Copyright (c) 2014-2021, ETH Zurich
 # All rights reserved.
 #
 # This file is part the GT4Py project and the GridTools framework.
@@ -203,6 +203,12 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         gt_ir.NativeFunction.TRUNC: "trunc",
     }
 
+    BUILTIN_TO_CPP = {
+        gt_ir.Builtin.NONE: "nullptr",  # really?
+        gt_ir.Builtin.FALSE: "false",
+        gt_ir.Builtin.TRUE: "true",
+    }
+
     def __init__(self, class_name, module_name, gt_backend_t, options):
         self.class_name = class_name
         self.module_name = module_name
@@ -247,7 +253,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         return result
 
     def _make_cpp_variable(self, decl: gt_ir.VarDecl) -> str:
-        result = "{t} {name}:".format(t=self.DATA_TYPE_TO_CPP[decl.data_type], name=decl.name)
+        result = "{t} {name};".format(t=self._make_cpp_type(decl.data_type), name=decl.name)
 
         return result
 
@@ -316,6 +322,9 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         dtype = self.DATA_TYPE_TO_CPP[node.dtype]
         return f"static_cast<{dtype}>({expr})"
 
+    def visit_BuiltinLiteral(self, node: gt_ir.BuiltinLiteral) -> str:
+        return self.BUILTIN_TO_CPP[node.value]
+
     def visit_NativeFuncCall(self, node: gt_ir.NativeFuncCall) -> str:
         call = self.NATIVE_FUNC_TO_CPP[node.func]
         if self.gt_backend_t != "cuda":
@@ -368,9 +377,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         elif node.level == gt_ir.LevelMarker.END:
             level = len(self.k_splitters) + 1
         else:
-            assert isinstance(node.level, gt_ir.VarRef)
-            assert len(node.level.index) == 1
-            level = self.k_splitters.index((node.name, node.index[0]))
+            raise NotImplementedError("VarRefs are not yet supported")
 
         # Shift offset to make it relative to the splitter (in-between levels)
         offset = node.offset + 1 if node.offset >= 0 else node.offset
@@ -393,11 +400,18 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
     ) -> Tuple[Tuple[Tuple[int, int], Tuple[int, int]], str]:
         interval_definition = self.visit(node.interval)
 
-        self.declared_symbols = set()
-        self.apply_block_symbols = {**self.stage_symbols, **node.local_symbols}
-        body_sources = self.visit(node.body)
+        body_sources = gt_text.TextBlock()
 
-        return interval_definition, body_sources
+        self.declared_symbols = set()
+        for name, var_decl in node.local_symbols.items():
+            assert isinstance(var_decl, gt_ir.VarDecl)
+            body_sources.append(self._make_cpp_variable(var_decl))
+            self.declared_symbols.add(name)
+
+        self.apply_block_symbols = {**self.stage_symbols, **node.local_symbols}
+        body_sources.extend(self.visit(node.body))
+
+        return interval_definition, body_sources.text
 
     def visit_Stage(self, node: gt_ir.Stage) -> Dict[str, Any]:
         # Initialize symbols for the generation of references in this stage
@@ -551,16 +565,22 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
             pyext_file_path=pyext_file_path,
         )
 
-    def generate_computation(self) -> Dict[str, Union[str, Dict]]:
+    def generate_computation(self, *, ir: Any = None) -> Dict[str, Union[str, Dict]]:
+        if not ir:
+            ir = self.builder.implementation_ir
         dir_name = f"{self.builder.options.name}_src"
-        src_files = self.make_extension_sources()
+        src_files = self.make_extension_sources(ir=ir)
         return {dir_name: src_files["computation"]}
 
-    def generate_bindings(self, language_name: str) -> Dict[str, Union[str, Dict]]:
+    def generate_bindings(
+        self, language_name: str, *, ir: Any = None
+    ) -> Dict[str, Union[str, Dict]]:
+        if not ir:
+            ir = self.builder.implementation_ir
         if language_name != "python":
             return super().generate_bindings(language_name)
         dir_name = f"{self.builder.options.name}_src"
-        src_files = self.make_extension_sources()
+        src_files = self.make_extension_sources(ir=ir)
         return {dir_name: src_files["bindings"]}
 
     @abc.abstractmethod
@@ -572,10 +592,15 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         """
         pass
 
-    def make_extension(self, *, uses_cuda: bool = False) -> Tuple[str, str]:
+    def make_extension(
+        self, *, gt_version: int = 1, ir: Any = None, uses_cuda: bool = False
+    ) -> Tuple[str, str]:
+        if not ir:
+            # in the GTC backend, `ir` is the definition_ir
+            ir = self.builder.implementation_ir
         # Generate source
         if not self.builder.options._impl_opts.get("disable-code-generation", False):
-            gt_pyext_sources: Dict[str, Any] = self.make_extension_sources()
+            gt_pyext_sources: Dict[str, Any] = self.make_extension_sources(ir=ir)
             gt_pyext_sources = {**gt_pyext_sources["computation"], **gt_pyext_sources["bindings"]}
         else:
             # Pass NOTHING to the self.builder means try to reuse the source code files
@@ -591,19 +616,18 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
                 debug_mode=self.builder.options.backend_opts.get("debug_mode", False),
                 add_profile_info=self.builder.options.backend_opts.get("add_profile_info", False),
                 uses_cuda=uses_cuda,
+                gt_version=gt_version,
             ),
         )
 
         result = self.build_extension_module(gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda)
         return result
 
-    def make_extension_sources(self) -> Dict[str, Dict[str, str]]:
+    def make_extension_sources(self, *, ir) -> Dict[str, Dict[str, str]]:
         """Generate the source for the stencil independently from use case."""
         if "computation_src" in self.builder.backend_data:
             return self.builder.backend_data["computation_src"]
-        class_name = (
-            self.pyext_class_name if self.builder.stencil_id else self.builder.options.name
-        )
+        class_name = self.pyext_class_name if self.builder.stencil_id else self.builder.options.name
         module_name = (
             self.pyext_module_name
             if self.builder.stencil_id
@@ -612,7 +636,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         gt_pyext_generator = self.PYEXT_GENERATOR_CLASS(
             class_name, module_name, self.GT_BACKEND_T, self.builder.options
         )
-        gt_pyext_sources = gt_pyext_generator(self.builder.implementation_ir)
+        gt_pyext_sources = gt_pyext_generator(ir)
         final_ext = ".cu" if self.languages and self.languages["computation"] == "cuda" else ".cpp"
         comp_src = gt_pyext_sources["computation"]
         for key in [k for k in comp_src.keys() if k.endswith(".src")]:
@@ -665,7 +689,11 @@ class GTMCBackend(BaseGTBackend):
 
 class GTCUDAPyModuleGenerator(gt_backend.CUDAPyExtModuleGenerator):
     def generate_pre_run(self) -> str:
-        field_names = self.args_data["field_info"].keys()
+        field_names = [
+            key
+            for key in self.args_data["field_info"]
+            if self.args_data["field_info"][key] is not None
+        ]
 
         return "\n".join([f + ".host_to_device()" for f in field_names])
 
@@ -673,7 +701,7 @@ class GTCUDAPyModuleGenerator(gt_backend.CUDAPyExtModuleGenerator):
         output_field_names = [
             name
             for name, info in self.args_data["field_info"].items()
-            if info and info.access == gt_definitions.AccessKind.READ_WRITE
+            if info is not None and info.access == gt_definitions.AccessKind.READ_WRITE
         ]
 
         return "\n".join([f + "._set_device_modified()" for f in output_field_names])

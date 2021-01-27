@@ -1,3 +1,19 @@
+# -*- coding: utf-8 -*-
+#
+# GT4Py - GridTools4Py - GridTools for Python
+#
+# Copyright (c) 2014-2021, ETH Zurich
+# All rights reserved.
+#
+# This file is part the GT4Py project and the GridTools framework.
+# GT4Py is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or any later
+# version. See the LICENSE.txt file at the top-level directory of this
+# distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 from typing import Iterator, List, Set, Tuple, Union
 
 import pytest
@@ -117,6 +133,37 @@ class TDefinition(TObject):
         return self
 
     @property
+    def width(self) -> int:
+        return 0
+
+    @property
+    def height(self) -> int:
+        return super().height - 1
+
+    @property
+    def api_signature(self) -> List[ArgumentInfo]:
+        return [ArgumentInfo(name=n, is_keyword=False) for n in self.fields]
+
+    @property
+    def api_fields(self) -> List[FieldDecl]:
+        tmp_field_names = self.field_names.difference(self.fields)
+        tmp_fields = [
+            FieldDecl(name=n, data_type=DataType.AUTO, axes=self.domain.axes_names, is_api=False)
+            for n in tmp_field_names
+        ]
+        return tmp_fields + [
+            FieldDecl(name=n, data_type=DataType.AUTO, axes=self.domain.axes_names, is_api=True)
+            for n in self.fields
+        ]
+
+    def build(self) -> StencilDefinition:
+        return StencilDefinition(
+            name=self.name,
+            domain=self.domain,
+            api_signature=self.api_signature,
+            api_fields=self.api_fields,
+            parameters=self.parameters,
+            computations=[block.build() for block in self.children],
             docstring=self.docstring,
             loc=self.loc,
         )
@@ -150,7 +197,8 @@ class TComputationBlock(TObject):
         return 0
 
     def build(self) -> ComputationBlock:
-        self.loc.scope = self.parent.child_scope
+        if self.parent:
+            self.loc.scope = self.parent.child_scope
         return ComputationBlock(
             interval=AxisInterval(
                 start=AxisBound(level=LevelMarker.START, offset=self.start),
@@ -213,7 +261,8 @@ class TAssign(TStatement):
         )
 
     def build(self) -> Assign:
-        self.loc.scope = self.parent.child_scope
+        if self.parent:
+            self.loc.scope = self.parent.child_scope
         return Assign(
             target=self.target.build(),
             value=self.value.build(),
@@ -239,7 +288,8 @@ class TFieldRef(TObject):
         self.offset = make_offset(offset)
 
     def build(self):
-        self.loc.scope = self.parent.child_scope
+        if self.parent:
+            self.loc.scope = self.parent.child_scope
         return FieldRef(
             name=self.name,
             offset=self.offset,
