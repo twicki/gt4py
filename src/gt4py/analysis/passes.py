@@ -411,7 +411,7 @@ class InitInfoPass(TransformPass):
                     if parallel_interval:
                         raise Exception(
                             "Cannot read with an offset after writing to a symbol "
-                            "in a restricted compute block"
+                            f"in a restricted compute block: {stmt_inputs_with_ij_offset}, {group_outputs}"
                         )
 
                     assert interval_block.stmts

@@ -322,9 +322,12 @@ class StencilObject(abc.ABC):
             origin = normalize_origin_mapping(origin)
 
         for name, field in used_field_args.items():
+            storage_ndim = len(field.shape)
             if "_all_" in origin:
                 field_mask = self._get_field_mask(name)
-                origin.setdefault(name, gt_ir.Index(origin["_all_"].filter_mask(field_mask)))
+                field_origin = gt_ir.Index(origin["_all_"].filter_mask(field_mask))
+                min_origin = [min(field.shape[i] - 1, field_origin[i]) for i in range(storage_ndim)]
+                origin.setdefault(name, Index(min_origin))
             else:
                 storage_ndim = len(field.shape)
                 api_ndim = len(self.field_info[name].axes)
