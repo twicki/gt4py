@@ -128,6 +128,7 @@ def stencil(
     format_source=True,
     name=None,
     rebuild=False,
+    compile_only=False,
     **kwargs,
 ):
     """Generate an implementation of the stencil definition with the specified backend.
@@ -224,6 +225,7 @@ def stencil(
         module=module,
         format_source=format_source,
         rebuild=rebuild,
+        compile_only=compile_only,
         backend_opts=kwargs,
         build_info=build_info,
         impl_opts=_impl_opts,

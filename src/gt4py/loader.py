@@ -70,5 +70,12 @@ def gtscript_loader(
     if not build_options.name:
         build_options.name = f"{definition_func.__name__}"
     stencil_class = load_stencil("gtscript", backend, definition_func, externals, build_options)
+    if build_options.compile_only:
 
+        def empty_func(
+            self, field_args, parameter_args, domain, origin, *, validate_args=True, exec_info=None
+        ):
+            pass
+
+        stencil_class._call_run = empty_func
     return stencil_class()
