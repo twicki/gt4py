@@ -47,10 +47,8 @@ class GTScriptSymbolError(GTScriptSyntaxError):
             if loc is None:
                 message = "Unknown symbol '{name}' symbol".format(name=name)
             else:
-                message = (
-                    "Unknown symbol '{name}' symbol in '{scope}' (line: {line}, col: {col})".format(
-                        name=name, scope=loc.scope, line=loc.line, col=loc.column
-                    )
+                message = "Unknown symbol '{name}' symbol in '{scope}' (line: {line}, col: {col})".format(
+                    name=name, scope=loc.scope, line=loc.line, col=loc.column
                 )
         super().__init__(message, loc=loc)
         self.name = name
@@ -730,6 +728,7 @@ class IRMaker(ast.NodeVisitor):
         self.extra_temp_decls = extra_temp_decls or {}
         self.iteration_order = None
         self.if_decls_stack = []
+        self._loopvar = None
         gt_ir.NativeFunction.PYTHON_SYMBOL_TO_IR_OP = {
             "abs": gt_ir.NativeFunction.ABS,
             "min": gt_ir.NativeFunction.MIN,
@@ -990,7 +989,7 @@ class IRMaker(ast.NodeVisitor):
         qualified_name = gt_meta.get_qualified_name_from_node(node)
         return self.visit(ast.Name(id=qualified_name, ctx=node.ctx))
 
-    def visit_Name(self, node: ast.Name) -> gt_ir.Ref:
+    def visit_Name(self, node: ast.Name) -> gt_ir.Expr:
         symbol = node.id
         if self._is_field(symbol):
             result = gt_ir.FieldRef.at_center(
@@ -1000,6 +999,8 @@ class IRMaker(ast.NodeVisitor):
             result = gt_ir.VarRef(name=symbol)
         elif self._is_local_symbol(symbol):
             assert False  # result = gt_ir.VarRef(name=symbol)
+        elif self._loopvar[0] == symbol:
+            result = gt_ir.ScalarLiteral(value=self._loopvar[1], data_type=gt_ir.DataType.INT32)
         else:
             assert False, "Missing '{}' symbol definition".format(symbol)
 
@@ -1313,6 +1314,19 @@ class IRMaker(ast.NodeVisitor):
         #  with computation(PARALLEL), interval(...):
         #    ...
         # otherwise just parse the node
+        if node.items[0].context_expr.func.id == "repetition":
+            compute_blocks = []
+
+            # todo: make sure that we only have one item here, or do unrolling already here?
+            self._loopvar = (node.items[0].optional_vars.id, 0)
+
+            # TODO: ensure that this is an ast.Constant object that has a value
+            iterations = node.items[0].context_expr.args[0].value
+            for i in range(iterations):
+                self._loopvar = (node.items[0].optional_vars.id, i)
+                for body in node.body:
+                    compute_blocks.extend(self._visit_computation_node(body))
+            return compute_blocks
 
         # Ensure top level `with` specifies the iteration order
         if not any(
@@ -1596,7 +1610,9 @@ class GTScriptParser(ast.NodeVisitor):
                         )
 
                 elif not exhaustive:
-                    resolved_values_list.append((name, GTScriptParser.eval_external(name, context)))
+                    resolved_values_list.append(
+                        (name, GTScriptParser.eval_external(name, context))
+                    )
 
             for name, value in resolved_values_list:
                 if hasattr(value, "_gtscript_") and exhaustive:
@@ -1762,7 +1778,9 @@ class GTScriptParser(ast.NodeVisitor):
                 fields_decls[item.name] for item in api_signature if item.name in fields_decls
             ],
             parameters=[
-                parameter_decls[item.name] for item in api_signature if item.name in parameter_decls
+                parameter_decls[item.name]
+                for item in api_signature
+                if item.name in parameter_decls
             ],
             computations=computations,
             externals=self.resolved_externals,
