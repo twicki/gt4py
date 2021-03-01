@@ -25,7 +25,17 @@ import gt4py.ir as gt_ir
 import gt4py.utils as gt_utils
 from gt4py import gtscript
 from gt4py.frontend import gtscript_frontend as gt_frontend
-from gt4py.gtscript import __INLINED, PARALLEL, I, J, computation, horizontal, interval, region
+from gt4py.gtscript import (
+    __INLINED,
+    PARALLEL,
+    I,
+    J,
+    computation,
+    horizontal,
+    interval,
+    region,
+    repetition,
+)
 
 from ..definitions import id_version
 
@@ -495,7 +505,9 @@ class TestExternalsWithSubroutines:
             "lap": _lap,
         }
 
-        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="in arguments to function calls"):
+        with pytest.raises(
+            gt_frontend.GTScriptSyntaxError, match="in arguments to function calls"
+        ):
             compile_definition(
                 definition_func, "test_no_nested_function_calls", module, externals=externals
             )
@@ -561,7 +573,9 @@ class TestFunctionReturn:
         with pytest.raises(
             gt_frontend.GTScriptSyntaxError, match="should have a single return statement"
         ):
-            compile_definition(definition_func, "test_multiple_return", module, externals=externals)
+            compile_definition(
+                definition_func, "test_multiple_return", module, externals=externals
+            )
 
     def test_conditional_return(self, id_version):
         @gtscript.function
@@ -1183,9 +1197,75 @@ class TestParallelIntervals:
             with computation(PARALLEL), interval(...):
                 field = func(field)
 
-        module = f"TestParallelIntervals_func_and_externals_{id_version}"
-        externals = {"ext": I[0] - np.iinfo(np.int32).max}
-        stencil_id, def_ir = compile_definition(
-            definition_func, "test_func_and_externals", module, externals=externals
-        )
-        assert len(def_ir.computations) == 4
+
+class TestSequentialLoop:
+    def test_repetition_with_value(self, id_version):
+        module = f"TestSequentialLoop_test_repetition_with_value_{id_version}"
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(4) as r:
+                with computation(PARALLEL), interval(...):
+                    inout_field = inout_field + r
+
+        compile_definition(definition_func, "versions_of_loops", module)
+
+    def test_repetition_with_value_no_loopvar(self, id_version):
+        module = f"TestSequentialLoop_test_repetition_with_value_no_loopvar_{id_version}"
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(4):
+                with computation(PARALLEL), interval(...):
+                    inout_field = inout_field + 1
+
+        compile_definition(definition_func, "repetition_with_value_no_loopvar", module)
+
+    def test_repetition_with_constant(self, id_version):
+        module = f"TestSequentialLoop_test_repetition_with_constant_{id_version}"
+        value = 10
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(value) as r:
+                with computation(PARALLEL), interval(...):
+                    inout_field = inout_field + r
+
+        compile_definition(definition_func, "repetition_with_constant", module)
+
+    def test_inlined_repetition(self, id_version):
+        module = f"TestSequentialLoop_test_inlined_repetition_{id_version}"
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(2) as r, computation(PARALLEL), interval(...):
+                inout_field = inout_field + r
+
+        compile_definition(definition_func, "inlined_repetition", module)
+
+    def test_inlined_repetition_no_looopvar(self, id_version):
+        module = f"TestSequentialLoop_test_inlined_repetition_no_looopvar_{id_version}"
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(2), computation(PARALLEL), interval(...):
+                inout_field = inout_field + 1
+
+        compile_definition(definition_func, "inlined_repetition_no_looopvar", module)
+
+    def test_separate_interval(self, id_version):
+        module = f"TestSequentialLoop_test_separate_interval_{id_version}"
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(2), computation(PARALLEL):
+                with interval(...):
+                    inout_field = inout_field + 1
+
+        compile_definition(definition_func, "separate_interval", module)
+
+    def test_separate_intervals(self, id_version):
+        module = f"TestSequentialLoop_test_separate_intervals_{id_version}"
+
+        def definition_func(inout_field: gtscript.Field[float]):
+            with repetition(2), computation(PARALLEL):
+                with interval(0, 2):
+                    inout_field = inout_field + 1
+                with interval(2, None):
+                    inout_field = inout_field + 2
+
+        compile_definition(definition_func, "separate_intervals", module)

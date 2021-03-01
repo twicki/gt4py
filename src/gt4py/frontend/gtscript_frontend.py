@@ -1316,18 +1316,34 @@ class IRMaker(ast.NodeVisitor):
         #  with computation(PARALLEL), interval(...):
         #    ...
         # otherwise just parse the node
+
+        if not isinstance(node.items[0].context_expr, ast.Call):
+            raise syntax_error
+
         if node.items[0].context_expr.func.id == "repetition":
+            with_calls = len(node.items)
+            if with_calls > 1:
+                # when we have multiple with items, we want to use the unroll functionality to 
+                # parse them so we remove this item and pass the rest on
+                repetition_with = node.items.pop(0)
+            else:
+                repetition_with = node.items[0]
+            if (
+                not isinstance(repetition_with.context_expr.args[0], ast.Constant)
+                or len(repetition_with.context_expr.args) > 1
+            ):
+                raise syntax_error
+            iterations = repetition_with.context_expr.args[0].value
             compute_blocks = []
-
-            # todo: make sure that we only have one item here, or do unrolling already here?
-            self._loopvar = (node.items[0].optional_vars.id, 0)
-
-            # TODO: ensure that this is an ast.Constant object that has a value
-            iterations = node.items[0].context_expr.args[0].value
             for i in range(iterations):
-                self._loopvar = (node.items[0].optional_vars.id, i)
-                for body in node.body:
-                    compute_blocks.extend(self._visit_computation_node(body))
+                if repetition_with.optional_vars:
+                    self._loopvar = (repetition_with.optional_vars.id, i)
+                if with_calls > 1:
+                    for with_node in self._unroll_computations(node):
+                        compute_blocks.extend(self._visit_computation_node(with_node))
+                else:
+                    for body in node.body:
+                        compute_blocks.extend(self._visit_computation_node(body))
             return compute_blocks
 
         # Ensure top level `with` specifies the iteration order
