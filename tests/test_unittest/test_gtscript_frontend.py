@@ -505,9 +505,7 @@ class TestExternalsWithSubroutines:
             "lap": _lap,
         }
 
-        with pytest.raises(
-            gt_frontend.GTScriptSyntaxError, match="in arguments to function calls"
-        ):
+        with pytest.raises(gt_frontend.GTScriptSyntaxError, match="in arguments to function calls"):
             compile_definition(
                 definition_func, "test_no_nested_function_calls", module, externals=externals
             )
@@ -573,9 +571,7 @@ class TestFunctionReturn:
         with pytest.raises(
             gt_frontend.GTScriptSyntaxError, match="should have a single return statement"
         ):
-            compile_definition(
-                definition_func, "test_multiple_return", module, externals=externals
-            )
+            compile_definition(definition_func, "test_multiple_return", module, externals=externals)
 
     def test_conditional_return(self, id_version):
         @gtscript.function

@@ -1323,7 +1323,7 @@ class IRMaker(ast.NodeVisitor):
         if node.items[0].context_expr.func.id == "repetition":
             with_calls = len(node.items)
             if with_calls > 1:
-                # when we have multiple with items, we want to use the unroll functionality to 
+                # when we have multiple with items, we want to use the unroll functionality to
                 # parse them so we remove this item and pass the rest on
                 repetition_with = node.items.pop(0)
             else:
