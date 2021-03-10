@@ -1391,8 +1391,8 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
 
                 if not_demotable:
                     self.demotables.pop(node.name)
-                elif kwargs["is_write"] and kwargs.get("inside_horizontal_if", False):
-                    # 3. is never assigned to in a horizontal region
+                elif kwargs.get("inside_horizontal_if", False):
+                    # 3. is never used in a horizontal region
                     self.demotables.pop(node.name)
 
     class DemoteSymbols(gt_ir.IRNodeMapper):
