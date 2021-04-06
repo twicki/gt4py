@@ -355,12 +355,11 @@ class _AxisOffset:
         return f"{self.axis}[{self.index}] + {self.offset}"
 
     def __add__(self, offset: int):
-        if not isinstance(offset, numbers.Integral):
-            raise TypeError("Offset should be an integer type")
         if offset == 0:
             return self
         else:
-            return _AxisOffset(self.axis, self.index, self.offset + offset)
+            self.offset = self.offset + offset
+            return self
 
     def __radd__(self, offset: int):
         return self.__add__(offset)
