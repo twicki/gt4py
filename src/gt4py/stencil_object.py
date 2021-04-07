@@ -243,7 +243,15 @@ class StencilObject(abc.ABC):
                 )
 
     def _call_run(
-        self, field_args, parameter_args, domain, origin, *, validate_args=True, exec_info=None
+        self,
+        field_args,
+        parameter_args,
+        domain,
+        origin,
+        *,
+        normalized_origin=None,
+        validate_args=True,
+        exec_info=None,
     ):
         """Check and preprocess the provided arguments (called by :class:`StencilObject` subclasses).
 
@@ -316,10 +324,13 @@ class StencilObject(abc.ABC):
                 raise ValueError(f"Parameter '{name}' is None.")
 
         # Origins
-        if origin is None:
-            origin = {}
+        if normalized_origin is not None:
+            origin = normalized_origin
         else:
-            origin = normalize_origin_mapping(origin)
+            if origin is None:
+                origin = {}
+            else:
+                origin = normalize_origin_mapping(origin)
 
         for name, field in used_field_args.items():
             if "_all_" in origin:
