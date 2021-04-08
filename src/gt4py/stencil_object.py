@@ -348,7 +348,7 @@ class StencilObject(abc.ABC):
 
         # Domain
         if normalized_domain is not None:
-            doamin = normalized_domain
+            domain = normalized_domain
         else:
             if domain is None:
                 domain = self._get_max_domain(used_field_args, origin)
