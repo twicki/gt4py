@@ -544,6 +544,7 @@ class BinaryOperator(enum.Enum):
     MUL = 3
     DIV = 4
     POW = 5
+    MOD = 6
 
     AND = 11
     OR = 12
@@ -570,6 +571,7 @@ BinaryOperator.IR_OP_TO_PYTHON_OP = {
     BinaryOperator.MUL: operator.mul,
     BinaryOperator.DIV: operator.truediv,
     BinaryOperator.POW: operator.pow,
+    BinaryOperator.MOD: operator.mod,
     # BinaryOperator.AND: lambda a, b: a and b,  # non short-circuit emulation
     # BinaryOperator.OR: lambda a, b: a or b,  # non short-circuit emulation
     BinaryOperator.LT: operator.lt,
@@ -586,6 +588,7 @@ BinaryOperator.IR_OP_TO_PYTHON_SYMBOL = {
     BinaryOperator.MUL: "*",
     BinaryOperator.DIV: "/",
     BinaryOperator.POW: "**",
+    BinaryOperator.MOD: "%",
     BinaryOperator.AND: "and",
     BinaryOperator.OR: "or",
     BinaryOperator.LT: "<",
