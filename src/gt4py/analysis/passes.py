@@ -18,6 +18,7 @@
 """
 
 import functools
+import copy
 import itertools
 import warnings
 from typing import (
@@ -1475,6 +1476,166 @@ class DemoteLocalTemporariesToVariablesPass(TransformPass):
     def apply(cls, transform_data: TransformData) -> None:
         demotables = cls.CollectDemotableSymbols.apply(transform_data.implementation_ir)
         cls.DemoteSymbols.apply(transform_data.implementation_ir, demotables)
+
+
+class ReduceTemporaryStoragesPass(TransformPass):
+    """Demote 3D temporaries only used within a single stage to 2D temporaries."""
+
+    class ReducibleFieldsCollector(gt_ir.IRNodeVisitor):
+        @classmethod
+        def apply(cls, node: gt_ir.StencilImplementation) -> Set[str]:
+            collector = cls()
+            return collector(node)
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> Set[str]:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.interval: gt_ir.AxisInterval = None
+            self.iteration_order: gt_ir.IterationOrder = None
+            self.reduced_fields: Dict[str, gt_ir.AxisInterval] = {
+                temp_field: None for temp_field in node.temporary_fields
+            }
+            self.visit(node)
+            return set(self.reduced_fields.keys())
+
+        def visit_MultiStage(self, node: gt_ir.MultiStage) -> None:
+            self.iteration_order = node.iteration_order
+            self.generic_visit(node)
+
+        def visit_ApplyBlock(self, node: gt_ir.ApplyBlock) -> None:
+            self.interval = node.interval
+            self.generic_visit(node)
+
+        def visit_FieldRef(self, node: gt_ir.FieldRef) -> None:
+            field_name = node.name
+            if field_name in self.reduced_fields:
+                if self.iteration_order == gt_ir.IterationOrder.PARALLEL:
+                    # Do not reduce fields accessed from parallel k-intervals
+                    self.reduced_fields.pop(field_name)
+                else:
+                    offsets: List[int] = list(node.offset.values())
+                    if offsets[-1] != 0:
+                        # Do not reduce fields with k-offsets
+                        self.reduced_fields.pop(field_name)
+                    else:
+                        # Do not reduce fields that are accessed across different k-intervals
+                        interval = self.reduced_fields[field_name]
+                        if interval is not None and interval != self.interval:
+                            self.reduced_fields.pop(field_name)
+                        else:
+                            self.reduced_fields[field_name] = self.interval
+
+    class StorageReducer(gt_ir.IRNodeMapper):
+        @classmethod
+        def apply(cls, node: gt_ir.StencilImplementation, reduced_fields: Set[str]) -> None:
+            instance = cls(reduced_fields)
+            return instance(node)
+
+        def __init__(self, reduced_fields: Set[str]):
+            self.reduced_fields = reduced_fields
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> gt_ir.StencilImplementation:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            return self.visit(node)
+
+        def visit_StencilImplementation(
+            self, path: tuple, node_name: str, node: gt_ir.StencilImplementation
+        ) -> gt_ir.StencilImplementation:
+            self.iir = node
+            for field_name in self.reduced_fields:
+                assert field_name in node.temporary_fields, "Tried to reduce API field to 2D."
+                field_decl = node.fields[field_name]
+                field_decl.axes.pop()
+            return self.generic_visit(path, node_name, node)
+
+        def visit_FieldRef(
+            self, path: tuple, node_name: str, node: gt_ir.FieldRef
+        ) -> Tuple[bool, Union[gt_ir.FieldRef, gt_ir.VarRef]]:
+            if node.name in self.reduced_fields:
+                field_decl = self.iir.fields[node.name]
+                node.offset = {axis: node.offset[axis] for axis in field_decl.axes}
+            return True, node
+
+    @classmethod
+    def apply(cls, transform_data: TransformData) -> None:
+        reduced_fields = cls.ReducibleFieldsCollector.apply(transform_data.implementation_ir)
+        cls.StorageReducer.apply(transform_data.implementation_ir, reduced_fields)
+
+
+class ConstantFoldingPass(TransformPass):
+    """Demote temporary fields to constants if only assigned to a single scalar value."""
+
+    class CollectConstants(gt_ir.IRNodeVisitor):
+        @classmethod
+        def apply(cls, node: gt_ir.StencilImplementation) -> Set[str]:
+            collector = cls()
+            return collector(node)
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> Set[str]:
+            assert isinstance(node, gt_ir.StencilImplementation)
+            self.constants = {field: 0 for field in node.temporary_fields}
+            self.visit(node)
+            return set(self.constants.keys())
+
+        def visit_Assign(self, node: gt_ir.Assign) -> None:
+            target_name = node.target.name
+            if target_name in self.constants:
+                self.constants[target_name] += 1
+                if (
+                    not isinstance(node.value, gt_ir.ScalarLiteral)
+                    or self.constants[target_name] > 1
+                ):
+                    self.constants.pop(target_name)
+
+    class ConstantFolder(gt_ir.IRNodeMapper):
+        @classmethod
+        def apply(cls, node: gt_ir.StencilImplementation, constants: Set[str]) -> None:
+            instance = cls(constants)
+            return instance(node)
+
+        def __init__(self, constants: Set[str]):
+            self.literals: Dict[str, gt_ir.ScalarLiteral] = {name: None for name in constants}
+
+        def __call__(self, node: gt_ir.StencilImplementation) -> gt_ir.StencilImplementation:
+            return self.visit(node)
+
+        def visit_StencilImplementation(
+            self, path: tuple, node_name: str, node: gt_ir.StencilImplementation
+        ) -> gt_ir.StencilImplementation:
+            res = self.generic_visit(path, node_name, node)
+            for name in self.literals:
+                node.fields.pop(name)
+                node.fields_extents.pop(name)
+            return res
+
+        def visit_FieldAccessor(
+            self, path: tuple, node_name: str, node: gt_ir.FieldAccessor
+        ) -> Tuple[bool, Optional[gt_ir.FieldAccessor]]:
+            if node.symbol in self.literals:
+                return False, None
+            else:
+                return True, node
+
+        def visit_Assign(self, path: tuple, node_name: str, node: gt_ir.Assign):
+            node.value = self.visit(node.value)
+            target_name = node.target.name
+            if target_name in self.literals:
+                self.literals[target_name] = copy.deepcopy(node.value)
+                return False, None
+            return True, node
+
+        def visit_FieldRef(
+            self, path: tuple, node_name: str, node: gt_ir.FieldRef
+        ) -> Tuple[bool, gt_ir.FieldRef]:
+            if node.name in self.literals:
+                return True, self.literals[node.name]
+            return True, node
+
+    @classmethod
+    def apply(cls, transform_data: TransformData) -> None:
+        constants = cls.CollectConstants.apply(transform_data.implementation_ir)
+        if constants:
+            cls.ConstantFolder.apply(transform_data.implementation_ir, constants)
+        return transform_data
 
 
 class HousekeepingPass(TransformPass):
