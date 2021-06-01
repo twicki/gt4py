@@ -18,7 +18,7 @@ from typing import List
 
 import networkx as nx
 
-import eve  # noqa: F401
+import eve
 from eve import Node, NodeTranslator, NodeVisitor
 from gtc_unstructured.irs import nir
 from gtc_unstructured.irs.nir_passes.field_dependency_graph import generate_dependency_graph
@@ -71,7 +71,7 @@ class _FindMergeCandidatesAnalysis(NodeVisitor):
             self.candidate.append(node)
             return
         elif (
-            self.candidate[-1].location_type == node.location_type
+            self.candidate[-1].iteration_space.location_type == node.iteration_space.location_type
         ):  # same location type as previous
             dependencies = generate_dependency_graph(self.candidate + [node])
             if not self.has_read_with_offset_after_write(dependencies):
@@ -98,7 +98,7 @@ class MergeHorizontalLoops(NodeTranslator):
         for candidate in merge_candidates:
             declarations = []
             statements = []
-            location_type = candidate[0].location_type
+            location_type = candidate[0].iteration_space.location_type
 
             first_index = node.horizontal_loops.index(candidate[0])
             last_index = node.horizontal_loops.index(candidate[-1])
@@ -107,14 +107,14 @@ class MergeHorizontalLoops(NodeTranslator):
                 declarations += loop.stmt.declarations
                 statements += loop.stmt.statements
 
-            node.horizontal_loops[first_index : last_index + 1] = [  # noqa: E203
+            node.horizontal_loops[first_index : last_index + 1] = [
                 nir.HorizontalLoop(
                     stmt=nir.BlockStmt(
                         declarations=declarations,
                         statements=statements,
                         location_type=location_type,
                     ),
-                    location_type=location_type,
+                    iteration_space=node.horizontal_loops[first_index].iteration_space,
                 )
             ]
 

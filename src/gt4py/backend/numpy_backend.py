@@ -28,6 +28,7 @@ from gt4py.utils.attrib import Set as SetOf
 from gt4py.utils.attrib import attribkwclass as attribclass
 from gt4py.utils.attrib import attribute
 
+from .module_generator import BaseModuleGenerator
 from .python_generator import PythonSourceGenerator
 
 
@@ -40,14 +41,6 @@ if TYPE_CHECKING:
 class ShapedExpr(gt_ir.Expr):
     axes = attribute(of=SetOf[str])
     expr = attribute(of=gt_ir.Expr)
-
-    def __getattr__(self, name):
-        return getattr(self.expr, name)
-
-
-@attribclass
-class ShapedCompositeExpr(ShapedExpr, gt_ir.CompositeExpr):
-    pass
 
 
 class NumpyIR(gt_ir.IRNodeMapper):
@@ -64,37 +57,6 @@ class NumpyIR(gt_ir.IRNodeMapper):
         self, path: tuple, node_name: str, node: gt_ir.FieldRef
     ) -> Tuple[bool, ShapedExpr]:
         return True, ShapedExpr(axes=set(self.fields[node.name].axes), expr=node)
-
-    def visit_VarRef(
-        self, path: tuple, node_name: str, node: gt_ir.FieldRef
-    ) -> Tuple[bool, gt_ir.VarRef]:
-        """VarRefs cannot be shaped."""
-        return True, node
-
-    def visit_Literal(
-        self, path: tuple, node_name: str, node: gt_ir.Literal
-    ) -> Tuple[bool, gt_ir.Literal]:
-        """Literals cannot be shaped."""
-        return True, node
-
-    def visit_Expr(self, path: tuple, node_name: str, node: gt_ir.Expr) -> Tuple[bool, gt_ir.Expr]:
-        """Conditionally change the gt_ir.Expr node to a ShapedExpr."""
-        keep_node, new_node = self.generic_visit(path, node_name, node)
-        assert keep_node, "This should not remove nodes"
-
-        axes = set()
-        axes_from_children = [
-            value.axes
-            for name, value in gt_ir.nodes.iter_attributes(new_node)
-            if isinstance(value, ShapedExpr)
-        ]
-        axes = set().union(*axes_from_children)
-
-        final_class = ShapedCompositeExpr if isinstance(node, gt_ir.CompositeExpr) else ShapedExpr
-        if not axes:
-            return True, new_node
-        else:
-            return True, final_class(axes=axes, expr=new_node)
 
 
 class NumPySourceGenerator(PythonSourceGenerator):
@@ -125,6 +87,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
         self.interval_k_start_name = interval_k_start_name
         self.interval_k_end_name = interval_k_end_name
         self.conditions_depth = 0
+        self.current_k_loop_range = list()
 
     def _make_field_origin(self, name: str, origin=None):
         if origin is None:
@@ -148,18 +111,21 @@ class NumPySourceGenerator(PythonSourceGenerator):
                 loop_bounds[r] += "{:+d}".format(bound[1])
 
         if iteration_order != gt_ir.IterationOrder.BACKWARD:
-            range_args = loop_bounds
+            current_k_loop_range = loop_bounds
         else:
-            range_args = [loop_bounds[1] + " -1", loop_bounds[0] + " -1", "-1"]
+            current_k_loop_range = [loop_bounds[1] + " -1", loop_bounds[0] + " -1", "-1"]
 
         if iteration_order != gt_ir.IterationOrder.PARALLEL:
-            range_expr = "range({args})".format(args=", ".join(a for a in range_args))
-            seq_axis = self.impl_node.domain.sequential_axis.name
-            source_lines.append(
-                "for {ax} in {range_expr}:".format(ax=seq_axis, range_expr=range_expr)
-            )
+            if self.current_k_loop_range != current_k_loop_range:
+                self.current_k_loop_range = current_k_loop_range
+                range_expr = "range({args})".format(args=", ".join(a for a in current_k_loop_range))
+                seq_axis = self.impl_node.domain.sequential_axis.name
+                source_lines.append(
+                    "for {ax} in {range_expr}:".format(ax=seq_axis, range_expr=range_expr)
+                )
             source_lines.extend(" " * self.indent_size + line for line in body_sources)
         else:
+            self.current_k_loop_range.clear()
             source_lines.append(
                 "{interval_k_start_name} = {lb}".format(
                     interval_k_start_name=self.interval_k_start_name, lb=loop_bounds[0]
@@ -196,24 +162,22 @@ class NumPySourceGenerator(PythonSourceGenerator):
 
     # ---- Visitor handlers ----
     def visit_ShapedExpr(self, node: ShapedExpr) -> str:
-        is_parallel = self.block_info.iteration_order == gt_ir.IterationOrder.PARALLEL
-
-        if is_parallel:
-            req_axes = self.impl_node.domain.axes_names
-        else:
-            req_axes = [axis.name for axis in self.impl_node.domain.parallel_axes]
-
         code = self.visit(node.expr)
-
-        leftover_axes = [ax for ax in req_axes if ax not in node.axes]
-        if leftover_axes and not isinstance(node, ShapedCompositeExpr):
-            view = ", ".join(
-                "{np}.newaxis".format(np=self.numpy_prefix) if axis not in node.axes else ":"
-                for axis in req_axes
+        if not isinstance(node.expr, ShapedExpr):
+            parallel_axes = (
+                self.impl_node.domain.axes
+                if self.block_info.iteration_order == gt_ir.IterationOrder.PARALLEL
+                else self.impl_node.domain.parallel_axes
             )
-            return f"({code})[{view}]"
-        else:
-            return code
+            parallel_axes_names = [axis.name for axis in parallel_axes]
+            leftover_axes = set(parallel_axes_names) - set(node.axes)
+            if leftover_axes:
+                np_newaxis = "{np}.newaxis".format(np=self.numpy_prefix)
+                view = ", ".join(
+                    ":" if axis in node.axes else np_newaxis for axis in parallel_axes_names
+                )
+                code = f"({code})[{view}]"
+        return code
 
     def visit_FieldRef(self, node: gt_ir.FieldRef) -> str:
         assert node.name in self.block_info.accessors
@@ -279,7 +243,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
                     )
                 )
 
-        source = "{name}[{index}]".format(name=node.name, index=", ".join(index))
+        data_idx = f", {','.join(str(i) for i in node.data_index)}" if node.data_index else ""
+        source = f"{node.name}[{', '.join(index)}{data_idx}]"
         if not parallel_axes_dims and not is_parallel:
             source = f"np.asarray([{source}])"
 
@@ -417,7 +382,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
         return sources
 
 
-class NumPyModuleGenerator(gt_backend.BaseModuleGenerator):
+class NumPyModuleGenerator(BaseModuleGenerator):
     def __init__(self):
         super().__init__()
         self.source_generator = NumPySourceGenerator(
@@ -484,3 +449,5 @@ class NumPyBackend(gt_backend.BaseBackend, gt_backend.PurePythonBackendCLIMixin)
     languages = {"computation": "python", "bindings": []}
 
     MODULE_GENERATOR_CLASS = NumPyModuleGenerator
+
+    USE_LEGACY_TOOLCHAIN = True

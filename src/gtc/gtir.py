@@ -27,32 +27,26 @@ Analysis is required to generate valid code (complying with the parallel model)
 - `FieldIfStmt` expansion to comply with the parallel model
 """
 
-from typing import Any, Dict, Generator, List, Set
+from typing import Any, Generator, List, Set, Tuple
 
 from pydantic import validator
 from pydantic.class_validators import root_validator
 
-from eve import Node, Str, SymbolName, SymbolTableTrait, utils
+from eve import Node, Str, SymbolName, SymbolTableTrait, field, utils
 from eve.iterators import TreeIterationItem
 from eve.typingx import RootValidatorValuesType
 from gtc import common
 from gtc.common import AxisBound, LocNode
 
 
+@utils.noninstantiable
 class Expr(common.Expr):
-    # TODO Eve could provide support for making a node abstract
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if type(self) is Expr:
-            raise TypeError("Trying to instantiate `Expr` abstract class.")
-        super().__init__(*args, **kwargs)
+    pass
 
 
+@utils.noninstantiable
 class Stmt(common.Stmt):
-    # TODO Eve could provide support for making a node abstract
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if type(self) is Stmt:
-            raise TypeError("Trying to instantiate `Stmt` abstract class.")
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class BlockStmt(common.BlockStmt[Stmt], Stmt):
@@ -63,17 +57,8 @@ class Literal(common.Literal, Expr):  # type: ignore
     pass
 
 
-class CartesianOffset(Node):
-    i: int
-    j: int
-    k: int
-
-    @classmethod
-    def zero(cls) -> "CartesianOffset":
-        return cls(i=0, j=0, k=0)
-
-    def to_dict(self) -> Dict[str, int]:
-        return {"i": self.i, "j": self.j, "k": self.k}
+class CartesianOffset(common.CartesianOffset):
+    pass
 
 
 class ScalarAccess(common.ScalarAccess, Expr):  # type: ignore
@@ -191,8 +176,8 @@ class Decl(LocNode):  # TODO probably Stmt
 
 
 class FieldDecl(Decl):
-    # TODO dimensions
-    pass
+    dimensions: Tuple[bool, bool, bool]
+    data_dims: Tuple[int, ...] = field(default_factory=tuple)
 
 
 class ScalarDecl(Decl):
@@ -270,3 +255,4 @@ class Stencil(LocNode, SymbolTableTrait):
         return [p.name for p in self.params]
 
     _validate_symbol_refs = common.validate_symbol_refs()
+    _validate_lvalue_dims = common.validate_lvalue_dims(VerticalLoop, FieldDecl)

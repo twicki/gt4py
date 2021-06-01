@@ -21,28 +21,20 @@ from typing import Any, List, Optional, Tuple, Union
 from pydantic.class_validators import validator
 
 import eve
-from eve import Str, StrEnum, SymbolName, SymbolTableTrait
+from eve import Str, StrEnum, SymbolName, SymbolTableTrait, field, utils
 from eve.type_definitions import SymbolRef
 from gtc import common
 from gtc.common import LocNode
 
 
+@utils.noninstantiable
 class Expr(common.Expr):
     dtype: Optional[common.DataType]
 
-    # TODO Eve could provide support for making a node abstract
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if type(self) is Expr:
-            raise TypeError("Trying to instantiate `Expr` abstract class.")
-        super().__init__(*args, **kwargs)
 
-
+@utils.noninstantiable
 class Stmt(common.Stmt):
-    # TODO Eve could provide support for making a node abstract
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if type(self) is Stmt:
-            raise TypeError("Trying to instantiate `Stmt` abstract class.")
-        super().__init__(*args, **kwargs)
+    pass
 
 
 class Offset(common.CartesianOffset):
@@ -164,7 +156,7 @@ class GTExtent(LocNode):
                 k=(min(self.k[0], offset.k), max(self.k[1], offset.k)),
             )
         else:
-            assert "Can only add CartesianOffsets"
+            raise AssertionError("Can only add CartesianOffsets")
 
 
 class GTAccessor(LocNode):
@@ -172,6 +164,7 @@ class GTAccessor(LocNode):
     id: int  # noqa: A003  # shadowing python builtin
     intent: Intent
     extent: GTExtent
+    ndim: int = 3
 
 
 class GTParamList(LocNode):
@@ -227,8 +220,8 @@ class ApiParamDecl(LocNode):
 
 
 class FieldDecl(ApiParamDecl):
-    # TODO dimensions
-    pass
+    dimensions: Tuple[bool, bool, bool]
+    data_dims: Tuple[int, ...] = field(default_factory=tuple)
 
 
 class GlobalParamDecl(ApiParamDecl):
@@ -241,15 +234,30 @@ class GTStage(LocNode):
     # or `temporaries`
     args: List[Arg]
 
+    @validator("args")
+    def has_args(cls, v: List[Arg]) -> List[Arg]:
+        if not v:
+            raise ValueError("At least one argument required")
+        return v
 
-class IJCache(LocNode):
+
+class Cache(LocNode):
     name: SymbolRef  # symbol ref to GTComputation params or temporaries
+
+
+class IJCache(Cache):
+    pass
+
+
+class KCache(Cache):
+    fill: bool
+    flush: bool
 
 
 class GTMultiStage(LocNode):
     loop_order: common.LoopOrder
     stages: List[GTStage]
-    caches: List[Union[IJCache]]
+    caches: List[Cache]
 
 
 class GTComputationCall(LocNode, SymbolTableTrait):
