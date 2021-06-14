@@ -69,15 +69,13 @@ class BaseOirSDFGBuilder(ABC):
         if self._axes[name][0]:
             subsets.append(
                 "{start}:__I{end:+d}".format(
-                    start=origin[0] + access_space[0][0],
-                    end=origin[0] + access_space[0][1],
+                    start=origin[0] + access_space[0][0], end=origin[0] + access_space[0][1]
                 )
             )
         if self._axes[name][1]:
             subsets.append(
                 "{start}:__J{end:+d}".format(
-                    start=origin[1] + access_space[1][0],
-                    end=origin[1] + access_space[1][1],
+                    start=origin[1] + access_space[1][0], end=origin[1] + access_space[1][1]
                 )
             )
         return subsets
@@ -187,23 +185,19 @@ class BaseOirSDFGBuilder(ABC):
 
         for name, recent_access in read_accesses.items():
             node.add_in_connector("IN_" + name)
-            self._state.add_edge(
-                recent_access,
-                None,
-                node,
-                "IN_" + name,
-                dace.Memlet(),
-            )
+            self._state.add_edge(recent_access, None, node, "IN_" + name, dace.Memlet())
 
     def _add_write_edges(self, node, collections: List[Tuple[Interval, AccessCollector.Result]]):
         write_accesses = dict()
         for interval, access_collection in collections:
             for name in access_collection.write_fields():
                 access_node = self._get_current_sink(name)
-                if (
-                    access_node is None
-                    or access_node in self._get_recent_reads(name, interval)
-                    or access_node in self._get_recent_writes(name, interval)
+                if access_node is None or (
+                    (name not in write_accesses)
+                    and (
+                        access_node in self._get_recent_reads(name, interval)
+                        or access_node in self._get_recent_writes(name, interval)
+                    )
                 ):
                     write_accesses[name] = self._get_new_sink(name)
                 else:
@@ -212,13 +206,7 @@ class BaseOirSDFGBuilder(ABC):
 
         for name, access_node in write_accesses.items():
             node.add_out_connector("OUT_" + name)
-            self._state.add_edge(
-                node,
-                "OUT_" + name,
-                access_node,
-                None,
-                dace.Memlet(),
-            )
+            self._state.add_edge(node, "OUT_" + name, access_node, None, dace.Memlet())
 
     def _add_write_after_write_edges(
         self, node, collections: List[Tuple[Interval, AccessCollector.Result]]

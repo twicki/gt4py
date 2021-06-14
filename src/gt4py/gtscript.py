@@ -75,8 +75,11 @@ builtins = {
     "__externals__",
     "__INLINED",
     "compile_assert",
+    "region",
+    "horizontal",
     *MATH_BUILTINS,
 }
+
 
 IGNORE_WHEN_INLINING = {*MATH_BUILTINS, "compile_assert"}
 
@@ -84,7 +87,8 @@ __all__ = list(builtins) + ["function", "stencil", "lazy_stencil"]
 
 __externals__ = "Placeholder"
 __gtscript__ = "Placeholder"
-
+horizontal = "Placeholder"
+region = "Placeholder"
 
 _VALID_DATA_TYPES = (
     bool,
@@ -362,6 +366,18 @@ class AxisIndex:
 
     def __str__(self):
         return f"{self.axis}[{self.offset}]"
+
+    def __add__(self, other):
+        if isinstance(other, AxisIndex):
+            assert self.axis==other.axis
+            return AxisIndex(axis=self.axis, offset=self.offset+other.offset)
+        return AxisIndex(axis=self.axis, offset=self.offset+other)
+
+    def __sub__(self, other):
+        if isinstance(other, AxisIndex):
+            assert self.axis==other.axis
+            return AxisIndex(axis=self.axis, offset=self.offset-other.offset)
+        return AxisIndex(axis=self.axis, offset=self.offset-other)
 
 
 class AxisInterval:
