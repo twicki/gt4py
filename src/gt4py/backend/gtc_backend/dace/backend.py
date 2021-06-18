@@ -17,13 +17,14 @@
 from typing import TYPE_CHECKING, Dict, Optional, Tuple, Type
 
 import dace
+import numpy as np
 
 from eve import codegen
 from eve.codegen import MakoTemplate as as_mako
 from gt4py import backend as gt_backend
 from gt4py import gt_src_manager
 from gt4py.backend import BaseGTBackend, CLIBackendMixin
-from gt4py.backend.gt_backends import make_x86_layout_map, x86_is_compatible_layout
+from gt4py.backend.gt_backends import make_x86_layout_map
 from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
 from gt4py.backend.module_generator import compute_legacy_extents
 from gt4py.ir import StencilDefinition
@@ -69,6 +70,7 @@ class GTCDaCeExtGenerator:
         oir = self._optimize_oir(oir)
         sdfg = OirSDFGBuilder().visit(oir)
         sdfg.expand_library_nodes(recursive=True)
+
         # TODO uncomment once the branch dace/linus-fixes-8 is merged into dace/master
         # sdfg.apply_strict_transformations(validate=True) # noqa: E800 Found commented out code
 
@@ -82,7 +84,7 @@ class GTCDaCeExtGenerator:
         }
 
     def _optimize_oir(self, oir):
-        # # oir = optimize_horizontal_executions(oir, GraphMerging)
+        # oir = optimize_horizontal_executions(oir, GraphMerging)
         # oir = GreedyMerging().visit(oir)
         # oir = AdjacentLoopMerging().visit(oir)
         # oir = LocalTemporariesToScalars().visit(oir)
@@ -151,7 +153,8 @@ class DaCeComputationCodegen:
 
     def generate_dace_args(self, gtir, sdfg):
         offset_dict: Dict[str, Tuple[int, int, int]] = {
-            k: (-v[0][0], -v[1][0], -v[2][0]) for k, v in compute_legacy_extents(gtir).items()
+            k: (-v[0][0], -v[1][0], -v[2][0])
+            for k, v in compute_legacy_extents(gtir, allow_negative=True).items()
         }
         symbols = {f"__{var}": f"__{var}" for var in "IJK"}
         for name, array in sdfg.arrays.items():
@@ -358,8 +361,8 @@ class GTCDaceBackend(BaseGTBackend, CLIBackendMixin):
         "alignment": 1,
         "device": "cpu",
         "layout_map": make_x86_layout_map,
-        "is_compatible_layout": x86_is_compatible_layout,
-        "is_compatible_type": x86_is_compatible_layout,
+        "is_compatible_layout": lambda x: True,
+        "is_compatible_type": lambda x: isinstance(x, np.ndarray),
     }
 
     options = BaseGTBackend.GT_BACKEND_OPTS

@@ -46,7 +46,7 @@ class BaseOirSDFGBuilder(ABC):
         self._sdfg = SDFG(name)
         self._state = self._sdfg.add_state(name + "_state")
         self._extents = nodes_extent_calculation(nodes)
-
+        self._nodes = nodes
         self._dtypes = {decl.name: decl.dtype for decl in stencil.declarations + stencil.params}
         self._axes = {
             decl.name: decl.dimensions
@@ -114,6 +114,13 @@ class BaseOirSDFGBuilder(ABC):
             for node in node.states()[0].nodes():
                 if isinstance(node, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
                     collection = self._get_access_collection(node)
+                    res._ordered_accesses.extend(collection._ordered_accesses)
+            return res
+        elif isinstance(node, list):
+            res = AccessCollector.Result([])
+            for n in node:
+                if isinstance(n, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
+                    collection = self._get_access_collection(n)
                     res._ordered_accesses.extend(collection._ordered_accesses)
             return res
         elif isinstance(node, HorizontalExecutionLibraryNode):
@@ -192,11 +199,13 @@ class BaseOirSDFGBuilder(ABC):
         for interval, access_collection in collections:
             for name in access_collection.write_fields():
                 access_node = self._get_current_sink(name)
+
                 if access_node is None or (
                     (name not in write_accesses)
                     and (
                         access_node in self._get_recent_reads(name, interval)
                         or access_node in self._get_recent_writes(name, interval)
+                        or nx.has_path(self._state.nx, access_node, node)
                     )
                 ):
                     write_accesses[name] = self._get_new_sink(name)
@@ -396,12 +405,15 @@ class VerticalLoopSectionOirSDFGBuilder(BaseOirSDFGBuilder):
 
     def get_k_subsets(self, node):
         assert isinstance(node, HorizontalExecutionLibraryNode)
-        collection = self._get_access_collection(node)
         write_subsets = dict()
         read_subsets = dict()
         k_origins = dict()
-        for name, offsets in collection.offsets().items():
+
+        section_collection = self._get_access_collection(self._nodes)
+        for name, offsets in section_collection.offsets().items():
             k_origins[name] = -min(o[2] for o in offsets)
+
+        collection = self._get_access_collection(node)
         for name, offsets in collection.read_offsets().items():
             if self._axes[name][2]:
                 read_subsets[name] = "{origin}{min_off:+d}:{origin}{max_off:+d}".format(
