@@ -21,7 +21,7 @@ from gt4py import gtscript
 from gt4py import storage as gt_storage
 from gt4py.gtscript import __INLINED, BACKWARD, FORWARD, PARALLEL, computation, interval
 
-from ..definitions import ALL_BACKENDS, CPU_BACKENDS, make_backend_params
+from ..definitions import ALL_BACKENDS, CPU_BACKENDS, OLD_BACKENDS, make_backend_params
 from .stencil_definitions import EXTERNALS_REGISTRY as externals_registry
 from .stencil_definitions import REGISTRY as stencil_definitions
 
@@ -203,7 +203,19 @@ def test_lower_dimensional_inputs(backend):
 
 
 @pytest.mark.parametrize(
-    "backend", make_backend_params("debug", "numpy", "gtc:gt:cpu_ifirst", "gtc:gt:cpu_kfirst")
+    "backend",
+    [
+        "debug",
+        "numpy",
+        pytest.param("gtx86", marks=[pytest.mark.xfail]),
+        pytest.param("gtmc", marks=[pytest.mark.xfail]),
+        pytest.param("gtcuda", marks=[pytest.mark.requires_gpu, pytest.mark.xfail]),
+        "gtc:gt:cpu_ifirst",
+        "gtc:gt:cpu_kfirst",
+        pytest.param("gtc:gt:gpu", marks=[pytest.mark.requires_gpu, pytest.mark.xfail]),
+        pytest.param("gtc:cuda", marks=[pytest.mark.requires_gpu, pytest.mark.xfail]),
+        "gtc:dace",
+    ],
 )
 def test_higher_dimensional_fields(backend):
     FLOAT64_VEC2 = (np.float64, (2,))
@@ -262,3 +274,46 @@ def test_input_order(backend):
     ):
         with computation(PARALLEL), interval(...):
             out_field = in_field * parameter
+
+
+@pytest.mark.parametrize("backend", OLD_BACKENDS)
+def test_variable_offsets(backend):
+    @gtscript.stencil(backend=backend)
+    def stencil_ij(
+        in_field: gtscript.Field[np.float_],
+        out_field: gtscript.Field[np.float_],
+        index_field: gtscript.Field[gtscript.IJ, int],
+    ):
+        with computation(FORWARD), interval(...):
+            out_field = in_field[0, 0, 1] + in_field[0, 0, index_field + 1]
+            index_field = index_field + 1
+
+    @gtscript.stencil(backend=backend)
+    def stencil_ijk(
+        in_field: gtscript.Field[np.float_],
+        out_field: gtscript.Field[np.float_],
+        index_field: gtscript.Field[int],
+    ):
+        with computation(PARALLEL), interval(...):
+            out_field = in_field[0, 0, 1] + in_field[0, 0, index_field + 1]
+
+
+@pytest.mark.parametrize("backend", OLD_BACKENDS)
+def test_variable_offsets_and_while_loop(backend):
+    @gtscript.stencil(backend=backend)
+    def stencil(
+        pe1: gtscript.Field[np.float_],
+        pe2: gtscript.Field[np.float_],
+        qin: gtscript.Field[np.float_],
+        qout: gtscript.Field[np.float_],
+        lev: gtscript.Field[gtscript.IJ, np.int_],
+    ):
+        with computation(FORWARD), interval(...):
+            if pe2[0, 0, 1] <= pe1[0, 0, lev]:
+                qout = qin[0, 0, 1]
+            else:
+                qsum = pe1[0, 0, lev + 1] - pe2[0, 0, lev]
+                while pe1[0, 0, lev + 1] < pe2[0, 0, 1]:
+                    qsum += qin[0, 0, lev] / (pe2[0, 0, 1] - pe1[0, 0, lev])
+                    lev = lev + 1
+                qout = qsum / (pe2[0, 0, 1] - pe2)

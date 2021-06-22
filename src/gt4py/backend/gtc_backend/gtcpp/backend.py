@@ -38,13 +38,15 @@ from gtc import gtir_to_oir
 from gtc.common import DataType
 from gtc.gtcpp import gtcpp, gtcpp_codegen, oir_to_gtcpp
 from gtc.passes.gtir_pipeline import GtirPipeline
+from gtc.passes.oir_dace_optimizations import GraphMerging, optimize_horizontal_executions
 from gtc.passes.oir_optimizations.caches import (
     IJCacheDetection,
     KCacheDetection,
     PruneKCacheFills,
     PruneKCacheFlushes,
 )
-from gtc.passes.oir_optimizations.horizontal_execution_merging import GreedyMerging, OnTheFlyMerging
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
+from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
 from gtc.passes.oir_optimizations.pruning import NoFieldAccessPruning
 from gtc.passes.oir_optimizations.temporaries import (
     LocalTemporariesToScalars,
@@ -80,11 +82,12 @@ class GTCGTExtGenerator:
         }
 
     def _optimize_oir(self, oir):
-        oir = GreedyMerging().visit(oir)
+        oir = optimize_horizontal_executions(oir, GraphMerging)
         oir = AdjacentLoopMerging().visit(oir)
         oir = LocalTemporariesToScalars().visit(oir)
         oir = WriteBeforeReadTemporariesToScalars().visit(oir)
         oir = OnTheFlyMerging().visit(oir)
+        oir = MaskStmtMerging().visit(oir)
         oir = NoFieldAccessPruning().visit(oir)
         oir = IJCacheDetection().visit(oir)
         oir = KCacheDetection().visit(oir)
@@ -124,6 +127,10 @@ class GTCppBindingsCodegen(codegen.TemplatedGenerator):
                     unique_index=self.unique_index(),
                     sid_ndim=sid_ndim,
                 )
+                sid_def = "gt::sid::shift_sid_origin({sid_def}, {name}_origin)".format(
+                    sid_def=sid_def,
+                    name=node.name,
+                )
                 if domain_ndim != 3:
                     gt_dims = [
                         f"gt::stencil::dim::{dim}"
@@ -137,10 +144,7 @@ class GTCppBindingsCodegen(codegen.TemplatedGenerator):
                         gt_dims=", ".join(gt_dims), sid_def=sid_def
                     )
 
-                return "gt::sid::shift_sid_origin({sid_def}, {name}_origin)".format(
-                    sid_def=sid_def,
-                    name=node.name,
-                )
+                return sid_def
 
     def visit_GlobalParamDecl(self, node: gtcpp.GlobalParamDecl, **kwargs):
         if "external_arg" in kwargs:
