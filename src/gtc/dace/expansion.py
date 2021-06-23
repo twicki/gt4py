@@ -88,6 +88,10 @@ class TaskletCodegen(codegen.TemplatedGenerator):
     Cast = as_fmt("{dtype}({expr})")
 
     def visit_NativeFunction(self, func: common.NativeFunction, **kwargs: Any) -> str:
+        if func == common.NativeFunction.ABS:
+            return "(lambda x: x if x>0.0 else -x)"
+        elif func == common.NativeFunction.MIN:
+            return "(lambda x, y: x if x<y else y)"
         try:
             return {
                 common.NativeFunction.ABS: "abs",

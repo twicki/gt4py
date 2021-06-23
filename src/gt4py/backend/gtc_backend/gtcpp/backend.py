@@ -60,11 +60,11 @@ if TYPE_CHECKING:
 
 
 class GTCGTExtGenerator:
-    def __init__(self, class_name, module_name, gt_backend_t, options):
+    def __init__(self, class_name, module_name, gt_backend_t, builder):
         self.class_name = class_name
         self.module_name = module_name
         self.gt_backend_t = gt_backend_t
-        self.options = options
+        self.builder = builder
 
     def __call__(self, definition_ir) -> Dict[str, Dict[str, str]]:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
