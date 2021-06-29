@@ -491,9 +491,6 @@ class DaCePyExtModuleGenerator(gt_backend.PyExtModuleGenerator):
         res = super().generate_imports()
         return res + "\nimport dace\nimport copy"
 
-    def generate_module_members(self) -> str:
-        res = super().generate_module_members()
-
     def generate_class_members(self):
         res = super().generate_class_members()
         filepath = self.builder.module_path.joinpath(

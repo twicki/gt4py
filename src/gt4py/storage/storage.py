@@ -13,7 +13,7 @@
 # distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
-
+import dace.data
 import numpy as np
 
 
@@ -246,6 +246,13 @@ class Storage(np.ndarray):
 
     def __iconcat__(self, other):
         raise NotImplementedError("Concatenation of Storages is not supported")
+
+    def __descriptor__(self):
+        return dace.data.Array(
+            shape=self.shape,
+            strides=[s // self.itemsize for s in self.strides],
+            dtype=dace.typeclass(str(self.dtype)),
+        )
 
 
 class GPUStorage(Storage):
