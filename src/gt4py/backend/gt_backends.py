@@ -214,10 +214,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         gt_ir.Builtin.TRUE: "true",
     }
 
-    def __init__(self, class_name, module_name, gt_backend_t, builder):
+    def __init__(self, class_name, module_name, backend, builder):
         self.class_name = class_name
         self.module_name = module_name
-        self.gt_backend_t = gt_backend_t
+        self.backend = backend
         self.builder = builder
 
         self.templates = {}
@@ -338,7 +338,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
     def visit_NativeFuncCall(self, node: gt_ir.NativeFuncCall) -> str:
         call = self.NATIVE_FUNC_TO_CPP[node.func]
-        if self.gt_backend_t != "cuda":
+        if self.backend.GT_BACKEND_T != "cuda":
             call = "std::" + call
         args = ",".join(self.visit(arg) for arg in node.args)
         return f"{call}({args})"
@@ -535,7 +535,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             api_names=api_names,
             arg_fields=arg_fields,
             constants=constants,
-            gt_backend=self.gt_backend_t,
+            gt_backend=self.backend.GT_BACKEND_T,
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,

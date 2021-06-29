@@ -57,9 +57,10 @@ if TYPE_CHECKING:
 
 
 class GTCCudaExtGenerator:
-    def __init__(self, class_name, module_name, gt_backend_t, builder):
+    def __init__(self, class_name, module_name, backend, builder):
         self.class_name = class_name
         self.module_name = module_name
+        self.backend = backend
         self.builder = builder
 
     def __call__(self, definition_ir) -> Dict[str, Dict[str, str]]:
@@ -117,12 +118,19 @@ class GTCCudaBindingsCodegen(codegen.TemplatedGenerator):
                     sid_ndim=sid_ndim,
                 )
             else:
+                layout_map = [
+                    x
+                    for x in make_cuda_layout_map(node.dimensions + (True,) * data_ndim)
+                    if x is not None
+                ]
                 sid_def = """gt::as_cuda_sid<{dtype}, {sid_ndim},
-                    gt::integral_constant<int, {unique_index}>>({name})""".format(
+                    gt::integral_constant<int, {unique_index}>,
+                    {unit_stride_dim}>({name})""".format(
                     name=node.name,
                     dtype=self.visit(node.dtype),
                     unique_index=self.unique_index(),
                     sid_ndim=sid_ndim,
+                    unit_stride_dim=layout_map.index(max(layout_map)),
                 )
                 sid_def = "gt::sid::shift_sid_origin({sid_def}, {name}_origin)".format(
                     sid_def=sid_def,
