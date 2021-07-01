@@ -65,12 +65,14 @@ class GreedyMerging(NodeTranslator):
                 and any(o[:2] != (0, 0) for o in offsets ^ previous_reads[field])
             }
             if not conflicting:
+                print("not conflict")
                 horizontal_executions[-1].body += horizontal_execution.body
                 for field, writes in current_writes.items():
                     previous_writes.setdefault(field, set()).update(writes)
                 for field, reads in current_reads.items():
                     previous_reads.setdefault(field, set()).update(reads)
             else:
+                print("conflict")
                 horizontal_executions.append(horizontal_execution)
                 previous_writes = current_writes
                 previous_reads = current_reads

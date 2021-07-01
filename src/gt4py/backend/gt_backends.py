@@ -214,11 +214,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
         gt_ir.Builtin.TRUE: "true",
     }
 
-    def __init__(self, class_name, module_name, backend, builder):
+    def __init__(self, class_name, module_name, backend):
         self.class_name = class_name
         self.module_name = module_name
         self.backend = backend
-        self.builder = builder
 
         self.templates = {}
         for key, file_name in self.TEMPLATE_FILES.items():
@@ -664,9 +663,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
             if self.builder.stencil_id
             else f"{self.builder.options.name}_pyext"
         )
-        gt_pyext_generator = self.PYEXT_GENERATOR_CLASS(
-            class_name, module_name, self.GT_BACKEND_T, self.builder
-        )
+        gt_pyext_generator = self.PYEXT_GENERATOR_CLASS(class_name, module_name, self)
         gt_pyext_sources = gt_pyext_generator(ir)
         final_ext = ".cu" if self.languages and self.languages["computation"] == "cuda" else ".cpp"
         comp_src = gt_pyext_sources["computation"]

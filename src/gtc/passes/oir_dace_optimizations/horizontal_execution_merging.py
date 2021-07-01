@@ -197,7 +197,7 @@ class GraphMerging(Transformation):
         if len(protected_intermediate_names & output_names) > 0:
             return False
 
-        return offsets_match(left, right)
+        return offsets_match(left, right) and left.iteration_space == right.iteration_space
 
     def apply(self, sdfg: dace.SDFG) -> None:
         state = sdfg.node(self.state_id)

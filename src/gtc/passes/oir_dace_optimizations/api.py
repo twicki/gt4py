@@ -13,6 +13,7 @@
 # distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
+from typing import List, Union
 
 from dace.transformation.transformation import Transformation
 
@@ -23,9 +24,20 @@ from gtc.dace.utils import iter_vertical_loop_section_sub_sdfgs
 
 
 def optimize_horizontal_executions(
-    stencil: oir.Stencil, transformation: Transformation
+    stencil: oir.Stencil, transformation: Union[Transformation, List[Transformation]]
 ) -> oir.Stencil:
     sdfg = OirSDFGBuilder().visit(stencil)
+    ctr = 0
     for subgraph in iter_vertical_loop_section_sub_sdfgs(sdfg):
-        subgraph.apply_transformations_repeated(transformation, validate=False)
+        print(ctr)
+        subgraph.save(f"pre{ctr}.sdfg")
+        subgraph.apply_transformations_repeated(transformation, validate=False, print_report=True)
+        subgraph.save(f"post{ctr}.sdfg")
+        ctr += 1
+    # import copy
+    # sdfg2: dace.SDFG = copy.deepcopy(sdfg)
+    # sdfg2.expand_library_nodes(recursive=False)
+    # sdfg2.view()
+    # sdfg2.expand_library_nodes(recursive=False)
+    # sdfg2.view()
     return dace_to_oir.convert(sdfg)

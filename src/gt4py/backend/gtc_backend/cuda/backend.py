@@ -57,11 +57,9 @@ if TYPE_CHECKING:
 
 
 class GTCCudaExtGenerator:
-    def __init__(self, class_name, module_name, backend, builder):
+    def __init__(self, class_name, module_name, backend):
         self.class_name = class_name
         self.module_name = module_name
-        self.backend = backend
-        self.builder = builder
 
     def __call__(self, definition_ir) -> Dict[str, Dict[str, str]]:
         gtir = DefIRToGTIR.apply(definition_ir)

@@ -472,7 +472,7 @@ class StencilOirSDFGBuilder(BaseOirSDFGBuilder):
         shapes = dict()
         for decl in self._stencil.params + self._stencil.declarations:
             name = decl.name
-            if name not in self._axes:
+            if name not in self._axes or name not in self._extents:
                 continue
             shape = []
             if self._axes[name][0]:

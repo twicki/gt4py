@@ -58,11 +58,10 @@ if TYPE_CHECKING:
 
 
 class GTCDaCeExtGenerator:
-    def __init__(self, class_name, module_name, backend, builder):
+    def __init__(self, class_name, module_name, backend):
         self.class_name = class_name
         self.module_name = module_name
         self.backend = backend
-        self.builder = builder
 
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
         gtir = DefIRToGTIR.apply(definition_ir)
@@ -83,8 +82,9 @@ class GTCDaCeExtGenerator:
             tmp_sdfg.transformation_hist = []
             tmp_sdfg.orig_sdfg = None
         sdfg.save(
-            self.builder.module_path.joinpath(
-                os.path.dirname(self.builder.module_path), self.builder.module_name + ".sdfg"
+            self.backend.builder.module_path.joinpath(
+                os.path.dirname(self.backend.builder.module_path),
+                self.backend.builder.module_name + ".sdfg",
             )
         )
 
@@ -98,12 +98,13 @@ class GTCDaCeExtGenerator:
         }
 
     def _optimize_oir(self, oir):
-        # oir = optimize_horizontal_executions(oir, GraphMerging)
+        oir_old = oir
+        # oir_daceandback = optimize_horizontal_executions(oir, [GraphMerging])
         # oir = GreedyMerging().visit(oir)
         # oir = AdjacentLoopMerging().visit(oir)
         # oir = LocalTemporariesToScalars().visit(oir)
         # oir = WriteBeforeReadTemporariesToScalars().visit(oir)
-        # oir = OnTheFlyMerging().visit(oir)
+        oir = OnTheFlyMerging().visit(oir_old)
         # oir = NoFieldAccessPruning().visit(oir)
         # oir = IJCacheDetection().visit(oir)
         # oir = KCacheDetection().visit(oir)
@@ -138,6 +139,7 @@ class GTCDaCeExtGenerator:
         nsdfg = wrapper_state.add_nested_sdfg(inner_sdfg, None, inputs=inputs, outputs=outputs)
 
         subset_strs = {}
+        inner_sdfg.view()
         for name, info in args_data.field_info.items():
             if info is None:
                 continue
