@@ -98,13 +98,12 @@ class GTCDaCeExtGenerator:
         }
 
     def _optimize_oir(self, oir):
-        oir_old = oir
-        # oir_daceandback = optimize_horizontal_executions(oir, [GraphMerging])
+        # oir = optimize_horizontal_executions(oir, [GraphMerging])
         # oir = GreedyMerging().visit(oir)
         # oir = AdjacentLoopMerging().visit(oir)
         # oir = LocalTemporariesToScalars().visit(oir)
         # oir = WriteBeforeReadTemporariesToScalars().visit(oir)
-        oir = OnTheFlyMerging().visit(oir_old)
+        # oir = OnTheFlyMerging().visit(oir)
         # oir = NoFieldAccessPruning().visit(oir)
         # oir = IJCacheDetection().visit(oir)
         # oir = KCacheDetection().visit(oir)
@@ -139,7 +138,7 @@ class GTCDaCeExtGenerator:
         nsdfg = wrapper_state.add_nested_sdfg(inner_sdfg, None, inputs=inputs, outputs=outputs)
 
         subset_strs = {}
-        inner_sdfg.view()
+
         for name, info in args_data.field_info.items():
             if info is None:
                 continue
