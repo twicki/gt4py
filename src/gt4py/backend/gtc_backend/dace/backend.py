@@ -73,8 +73,7 @@ class GTCDaCeExtGenerator:
         sdfg = OirSDFGBuilder().visit(oir)
         sdfg.expand_library_nodes(recursive=True)
 
-        # TODO uncomment once the branch dace/linus-fixes-8 is merged into dace/master
-        # sdfg.apply_strict_transformations(validate=True) # noqa: E800 Found commented out code
+        sdfg.apply_strict_transformations(validate=True)
 
         sdfg = self._expand_and_wrap_sdfg(gtir, sdfg)
 
