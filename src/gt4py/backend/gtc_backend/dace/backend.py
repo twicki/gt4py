@@ -72,9 +72,6 @@ class GTCDaCeExtGenerator:
         oir = gtir_to_oir.GTIRToOIR().visit(upcasted)
         oir = self._optimize_oir(oir)
         sdfg = OirSDFGBuilder().visit(oir)
-        sdfg.expand_library_nodes(recursive=True)
-
-        sdfg.apply_strict_transformations(validate=True)
 
         sdfg = self._expand_and_wrap_sdfg(gtir, sdfg)
 
@@ -101,7 +98,6 @@ class GTCDaCeExtGenerator:
 
     def _optimize_oir(self, oir):
         # oir = optimize_horizontal_executions(oir, [GraphMerging])
-        # oir = GreedyMerging().visit(oir)
         # oir = AdjacentLoopMerging().visit(oir)
         # oir = LocalTemporariesToScalars().visit(oir)
         # oir = WriteBeforeReadTemporariesToScalars().visit(oir)
@@ -124,6 +120,8 @@ class GTCDaCeExtGenerator:
             return wrapper_sdfg
 
         inner_sdfg.expand_library_nodes(recursive=True)
+        inner_sdfg.apply_strict_transformations()
+
         extents = compute_legacy_extents(gtir, allow_negative=True)
 
         inputs = {
@@ -199,40 +197,15 @@ class GTCDaCeExtGenerator:
             if info is not None and name not in wrapper_sdfg.symbols:
                 wrapper_sdfg.add_symbol(name, nsdfg.sdfg.symbols[name])
 
-        #     for name, info in args_data.field_info.items():
-        #         assert info is None
-        #         wrapper_sdfg.add_array()
-        #         wrapper_state.add_edge(
-        #             wrapper_state.add_read(name),
-        #             None,
-        #             nsdfg,
-        #             name,
-        #             dace.Memlet(),
-        #         )
-        #         wrapper_state.add_edge(
-        #             nsdfg,
-        #             name,
-        #             wrapper_state.add_read(name),
-        #             None,
-        #             dace.Memlet(),
-        #         )
+        from dace.transformation import strict_transformations
+        from dace.transformation.dataflow import MapCollapse
+        from dace.transformation.interstate import InlineSDFG
 
-        # for sdfg, name, array in inner_sdfg.arrays_recursive():
-        #     if name not in transients:
-        #         continue
-        #     strides = [*array.strides]
-        #     for i, stride in enumerate(array.strides):
-        #         if str(stride) in symbol_mapping:
-        #             if str(stride) in sdfg.symbols and re.match(f"__.*_._stride", str(stride)):
-        #                 sdfg.remove_symbol(str(stride))
-        #
-        #             strides[i] = dace.symbolic.pystr_to_symbolic(symbol_mapping[str(stride)])
-        #             strides[i].free_symbols
-        #             for sym in strides[i].free_symbols:
-        #                 if str(sym) not in sdfg.symbols:
-        #                     sdfg.add_symbol(str(sym), inner_sdfg.symbols[str(sym)])
-        #     array.strides = tuple(strides)
-
+        wrapper_sdfg.apply_transformations_repeated(
+            [*strict_transformations(), MapCollapse], strict=True
+        )
+        # wrapper_sdfg.apply_strict_transformations(validate=True)
+        wrapper_sdfg.validate()
         return wrapper_sdfg
 
 

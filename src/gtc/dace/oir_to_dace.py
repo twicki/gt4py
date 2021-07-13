@@ -45,6 +45,8 @@ class BaseOirSDFGBuilder(ABC):
         self._stencil = stencil
         self._sdfg = SDFG(name)
         self._state = self._sdfg.add_state(name + "_state")
+        for node in nodes:
+            self._state.add_node(node)
         self._extents = nodes_extent_calculation(nodes)
         self._nodes = nodes
         self._dtypes = {decl.name: decl.dtype for decl in stencil.declarations + stencil.params}

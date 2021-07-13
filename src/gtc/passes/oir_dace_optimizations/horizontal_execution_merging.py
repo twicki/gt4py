@@ -23,7 +23,7 @@ Merging is performed by merging the body of "right" into "left" within this modu
 This is equivalent to merging the later into the earlier occurring horizontal execution
 by order within the OIR. This is consistently reflected in variable and parameter names.
 """
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import dace
 import dace.subsets
@@ -73,6 +73,22 @@ def offsets_match(
         ij_offsets(left_accesses.read_offsets()), ij_offsets(right_accesses.write_offsets())
     )
     return not conflicting
+
+
+def iteration_space_compatible(
+    left: HorizontalExecutionLibraryNode,
+    right: HorizontalExecutionLibraryNode,
+    sdfg: Dict[str, Any],
+):
+
+    if left.iteration_space == right.iteration_space:
+        return True
+
+    for name in set(left.out_connectors) & set(right.out_connectors):
+        if name in sdfg.arrays:
+            if not sdfg.arrays[name].transient:
+                return False
+    return True
 
 
 def unwire_access_node(
@@ -168,7 +184,7 @@ class GraphMerging(Transformation):
         graph: SDFGState,
         candidate: Dict[str, dace.nodes.Node],
         expr_index: int,
-        sdfg: Union[dace.SDFG, SDFGState],
+        sdfg: dace.SDFG,
         strict: bool = False,
     ) -> bool:
         left = self.left(sdfg)
@@ -197,7 +213,7 @@ class GraphMerging(Transformation):
         if len(protected_intermediate_names & output_names) > 0:
             return False
 
-        return offsets_match(left, right) and left.iteration_space == right.iteration_space
+        return offsets_match(left, right) and iteration_space_compatible(left, right, sdfg)
 
     def apply(self, sdfg: dace.SDFG) -> None:
         state = sdfg.node(self.state_id)

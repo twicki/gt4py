@@ -29,7 +29,7 @@ import operator
 import os
 import re
 import types
-from typing import Callable, Dict, Type
+from typing import Callable, Dict, Type, Union
 
 import dace
 import numpy as np
@@ -657,9 +657,13 @@ class AxisIndex:
     def __str__(self):
         return f"{self.axis}[{self.index}] + {self.offset}"
 
-    def __add__(self, offset: int):
-        if not isinstance(offset, numbers.Integral):
-            raise TypeError("Offset should be an integer type")
+    def __add__(self, offset: Union[int, "AxisIndex"]):
+        if not isinstance(offset, numbers.Integral) and not isinstance(offset, AxisIndex):
+            raise TypeError("Offset should be an integer type or axis index")
+        if isinstance(offset, AxisIndex):
+            if not self.axis == other.axis:
+                raise ValueError("Only AxisIndex with same axis can be added.")
+            offset = offset.offset
         if offset == 0:
             return self
         else:
@@ -674,17 +678,8 @@ class AxisIndex:
     def __rsub__(self, offset: int):
         return self.__radd__(-offset)
 
-    def __add__(self, other):
-        if isinstance(other, AxisIndex):
-            assert self.axis == other.axis
-            return AxisIndex(axis=self.axis, offset=self.offset + other.offset)
-        return AxisIndex(axis=self.axis, offset=self.offset + other)
-
-    def __sub__(self, other):
-        if isinstance(other, AxisIndex):
-            assert self.axis == other.axis
-            return AxisIndex(axis=self.axis, offset=self.offset - other.offset)
-        return AxisIndex(axis=self.axis, offset=self.offset - other)
+    def __neg__(self):
+        return AxisIndex(self.axis, self.index, -self.offset)
 
 
 class AxisInterval:
