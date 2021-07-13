@@ -97,16 +97,16 @@ class GTCDaCeExtGenerator:
         }
 
     def _optimize_oir(self, oir):
-        # oir = optimize_horizontal_executions(oir, [GraphMerging])
-        # oir = AdjacentLoopMerging().visit(oir)
-        # oir = LocalTemporariesToScalars().visit(oir)
-        # oir = WriteBeforeReadTemporariesToScalars().visit(oir)
-        # oir = OnTheFlyMerging().visit(oir)
-        # oir = NoFieldAccessPruning().visit(oir)
-        # oir = IJCacheDetection().visit(oir)
-        # oir = KCacheDetection().visit(oir)
-        # oir = PruneKCacheFills().visit(oir)
-        # oir = PruneKCacheFlushes().visit(oir)
+        oir = optimize_horizontal_executions(oir, [GraphMerging])
+        oir = AdjacentLoopMerging().visit(oir)
+        oir = LocalTemporariesToScalars().visit(oir)
+        oir = WriteBeforeReadTemporariesToScalars().visit(oir)
+        oir = OnTheFlyMerging().visit(oir)
+        oir = NoFieldAccessPruning().visit(oir)
+        oir = IJCacheDetection().visit(oir)
+        oir = KCacheDetection().visit(oir)
+        oir = PruneKCacheFills().visit(oir)
+        oir = PruneKCacheFlushes().visit(oir)
         return oir
 
     def _expand_and_wrap_sdfg(self, gtir: gtir.Stencil, inner_sdfg: dace.SDFG) -> dace.SDFG:
