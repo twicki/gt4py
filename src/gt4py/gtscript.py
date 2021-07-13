@@ -24,6 +24,7 @@ import collections
 import copy
 import inspect
 import itertools
+import numbers
 import operator
 import os
 import re
@@ -79,6 +80,8 @@ builtins = {
     "externals",
     "computation",
     "interval",
+    "horizontal",
+    "region",
     "__gtscript__",
     "__externals__",
     "__INLINED",
@@ -640,15 +643,36 @@ class SDFGWrapper:
 
 
 class AxisIndex:
-    def __init__(self, axis: str, offset: int):
+    def __init__(self, axis: str, index: int, offset: int = 0):
         self.axis = axis
+        self.index = index
         self.offset = offset
 
     def __repr__(self):
-        return f"AxisIndex(axis={self.axis}, offset={self.offset})"
+        return f"AxisIndex(axis={self.axis}, index={self.index}, offset={self.offset})"
+
+    def __eq__(self, other):
+        return repr(self) == repr(other)
 
     def __str__(self):
-        return f"{self.axis}[{self.offset}]"
+        return f"{self.axis}[{self.index}] + {self.offset}"
+
+    def __add__(self, offset: int):
+        if not isinstance(offset, numbers.Integral):
+            raise TypeError("Offset should be an integer type")
+        if offset == 0:
+            return self
+        else:
+            return AxisIndex(self.axis, self.index, self.offset + offset)
+
+    def __radd__(self, offset: int):
+        return self.__add__(offset)
+
+    def __sub__(self, offset: int):
+        return self.__add__(-offset)
+
+    def __rsub__(self, offset: int):
+        return self.__radd__(-offset)
 
     def __add__(self, other):
         if isinstance(other, AxisIndex):
@@ -861,6 +885,21 @@ def computation(order):
 def interval(*args):
     """Define the interval of computation in the 'K' sequential axis."""
     pass
+
+
+def horizontal(*args):
+    """Define a block of code that is restricted to a set of regions in the parallel axes."""
+    pass
+
+
+class _Region:
+    def __getitem__(self, *args):
+        """Define a region in the parallel axes."""
+        pass
+
+
+# Horizontal regions
+region = _Region()
 
 
 def __INLINED(compile_if_expression):
