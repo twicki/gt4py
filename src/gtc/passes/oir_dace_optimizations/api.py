@@ -13,7 +13,6 @@
 # distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
-import copy
 
 from dace.transformation.transformation import Transformation
 
@@ -27,6 +26,9 @@ def optimize_horizontal_executions(
     stencil: oir.Stencil, transformation: Transformation
 ) -> oir.Stencil:
     sdfg = OirSDFGBuilder().visit(stencil)
+    api_fields = {param.name for param in stencil.params}
     for subgraph in iter_vertical_loop_section_sub_sdfgs(sdfg):
-        subgraph.apply_transformations_repeated(transformation, validate=False)
+        subgraph.apply_transformations_repeated(
+            transformation, validate=False, options=dict(api_fields=api_fields)
+        )
     return dace_to_oir.convert(sdfg)

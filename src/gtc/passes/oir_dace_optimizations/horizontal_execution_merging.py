@@ -23,12 +23,13 @@ Merging is performed by merging the body of "right" into "left" within this modu
 This is equivalent to merging the later into the earlier occurring horizontal execution
 by order within the OIR. This is consistently reflected in variable and parameter names.
 """
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import dace
 import dace.subsets
 import networkx as nx
 from dace import SDFGState
+from dace.properties import Property, make_properties
 from dace.sdfg import graph
 from dace.sdfg.utils import node_path_graph
 from dace.transformation.transformation import PatternNode, Transformation
@@ -80,16 +81,16 @@ def offsets_match(
 def iteration_space_compatible(
     left: HorizontalExecutionLibraryNode,
     right: HorizontalExecutionLibraryNode,
-    sdfg: Dict[str, Any],
+    api_fields: Set[str],
 ):
 
     if left.iteration_space == right.iteration_space:
         return True
 
-    for name in set(left.out_connectors) & set(right.out_connectors):
-        if name in sdfg.arrays:
-            if not sdfg.arrays[name].transient:
-                return False
+    for conn_name in set(left.out_connectors) | set(right.out_connectors):
+        name = conn_name[len("OUT_") :]
+        if name in api_fields:
+            return False
     return True
 
 
@@ -167,7 +168,14 @@ def optional_node(pattern_node: PatternNode, sdfg: dace.SDFG) -> Optional[dace.n
 
 
 @dace.registry.autoregister_params(singlestate=True)
+@make_properties
 class GraphMerging(Transformation):
+
+    api_fields = Property(
+        dtype=set,
+        desc="Set of field names that are parameters to the parent stencil",
+    )
+
     left = PatternNode(HorizontalExecutionLibraryNode)
     right = PatternNode(HorizontalExecutionLibraryNode)
     access = PatternNode(dace.nodes.AccessNode)
@@ -215,7 +223,9 @@ class GraphMerging(Transformation):
         if len(protected_intermediate_names & output_names) > 0:
             return False
 
-        return offsets_match(left, right) and iteration_space_compatible(left, right, sdfg)
+        return offsets_match(left, right) and iteration_space_compatible(
+            left, right, self.api_fields
+        )
 
     def apply(self, sdfg: dace.SDFG) -> None:
         state = sdfg.node(self.state_id)
