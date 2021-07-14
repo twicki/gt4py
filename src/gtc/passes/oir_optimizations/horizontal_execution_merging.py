@@ -19,7 +19,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from eve import NodeTranslator
 from gtc import common, oir
-from gtc.common import GTCPostconditionError, GTCPreconditionError
 
 from .utils import AccessCollector, symbol_name_creator
 
@@ -187,7 +186,7 @@ class OnTheFlyMerging(NodeTranslator):
         )
 
     def visit_Stencil(self, node: oir.Stencil, **kwargs: Any) -> oir.Stencil:
-        vertical_loops = []
+        vertical_loops: List[oir.VerticalLoop] = []
         protected_fields = set(n.name for n in node.params)
         for vl in reversed(node.vertical_loops):
             vertical_loops.insert(
