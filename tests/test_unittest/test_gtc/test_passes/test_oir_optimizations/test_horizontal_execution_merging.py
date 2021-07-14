@@ -15,7 +15,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 from gtc import common, oir
-from gtc.passes.oir_optimizations.horizontal_execution_merging import GreedyMerging, OnTheFlyMerging
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 
 from ...oir_utils import (
     AssignStmtFactory,
