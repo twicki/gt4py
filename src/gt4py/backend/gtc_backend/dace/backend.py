@@ -21,7 +21,7 @@ import dace
 import numpy as np
 
 import gt4py.definitions
-from eve import codegen
+from eve import NodeVisitor, codegen
 from eve.codegen import MakoTemplate as as_mako
 from gt4py import backend as gt_backend
 from gt4py import gt_src_manager
@@ -29,11 +29,12 @@ from gt4py.backend import BaseGTBackend, CLIBackendMixin, make_args_data_from_gt
 from gt4py.backend.gt_backends import make_x86_layout_map
 from gt4py.backend.gtc_backend.common import bindings_main_template, pybuffer_to_sid
 from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
-from gt4py.backend.module_generator import compute_legacy_extents
 from gt4py.ir import StencilDefinition
 from gtc import gtir, gtir_to_oir
+from gtc.common import LevelMarker
 from gtc.dace.oir_to_dace import OirSDFGBuilder
 from gtc.dace.utils import array_dimensions
+from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
 from gtc.passes.oir_optimizations.inlining import MaskInlining
@@ -185,6 +186,29 @@ class GTCDaCeExtGenerator:
         return wrapper_sdfg
 
 
+class KOriginsVisitor(NodeVisitor):
+    def visit_Stencil(self, node: gtir.Stencil):
+        k_origins: Dict[str, int] = dict()
+        self.generic_visit(node, k_origins=k_origins)
+        return k_origins
+
+    def visit_VerticalLoop(self, node: gtir.VerticalLoop, **kwargs):
+        self.generic_visit(node, interval=node.interval, **kwargs)
+
+    def visit_FieldAccess(
+        self, node: gtir.FieldAccess, *, k_origins, interval: gtir.Interval
+    ) -> None:
+        if interval.start.level == LevelMarker.START:
+            candidate = max(0, -interval.start.offset - node.offset.k)
+        else:
+            candidate = 0
+        k_origins[node.name] = max(k_origins.get(node.name, 0), candidate)
+
+
+def compute_k_origins(node: gtir.Stencil) -> Dict[str, int]:
+    return KOriginsVisitor().visit(node)
+
+
 class DaCeComputationCodegen:
 
     template = as_mako(
@@ -243,6 +267,11 @@ class DaCeComputationCodegen:
         offset_dict: Dict[str, Tuple[int, int, int]] = {
             k: (-v[0][0], -v[1][0], -v[2][0]) for k, v in compute_legacy_extents(gtir).items()
         }
+        k_origins = compute_k_origins(gtir)
+        for name, origin in k_origins.items():
+            print(origin)
+            offset_dict[name] = (offset_dict[name][0], offset_dict[name][1], origin)
+
         symbols = {f"__{var}": f"__{var}" for var in "IJK"}
         for name, array in sdfg.arrays.items():
             if array.transient:
