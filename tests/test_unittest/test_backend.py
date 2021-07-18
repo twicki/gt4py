@@ -18,7 +18,6 @@ import inspect
 
 import pytest
 
-import gt4py.backend
 import gt4py.backend as gt_backend
 from gt4py.backend import REGISTRY as backend_registry
 from gt4py.backend.module_generator import make_args_data_from_gtir, make_args_data_from_iir
@@ -168,12 +167,14 @@ def test_device_sync_option_effective(backend_name, mode, device_sync):
         assert "cupy.cuda.Device(0).synchronize()" not in source
 
 
-@pytest.mark.parametrize("backend", GPU_BACKENDS)
-def test_device_sync_option_registered(backend):
-    backend_opts = gt4py.backend.from_name(backend).options
-    assert "device_sync" in backend_opts
-    assert backend_opts["device_sync"]["versioning"]
-    assert backend_opts["device_sync"]["type"] is bool
+@pytest.mark.parametrize("backend_name", GPU_BACKENDS)
+def test_device_sync_option_registered(backend_name):
+    backend_cls = backend_registry[backend_name]
+    backend_opts = backend_cls.options
+    option_name = "device_sync"
+    assert option_name in backend_opts
+    assert backend_opts[option_name]["versioning"]
+    assert backend_opts[option_name]["type"] is bool
 
 
 if __name__ == "__main__":
