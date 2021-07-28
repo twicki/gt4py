@@ -208,7 +208,6 @@ class BaseOirSDFGBuilder(ABC):
         for interval, access_collection in collections:
             for name in access_collection.write_fields():
                 access_node = self._get_current_sink(name)
-
                 if access_node is None or (
                     (name not in write_accesses)
                     and (
