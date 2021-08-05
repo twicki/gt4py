@@ -211,7 +211,7 @@ class DefIRToGTIR(IRNodeVisitor):
             false_expr=self.visit(node.else_expr, **kwargs),
         )
 
-    def visit_BuiltinLiteral(self, node: BuiltinLiteral) -> gtir.Literal:  # type: ignore[return]
+    def visit_BuiltinLiteral(self, node: BuiltinLiteral, **kwargs: Any) -> gtir.Literal:  # type: ignore[return]
         # currently deals only with boolean literals
         if node.value in self.GT4PY_BUILTIN_TO_GTIR.keys():
             return gtir.Literal(
@@ -224,7 +224,7 @@ class DefIRToGTIR(IRNodeVisitor):
             dtype=common.DataType(node.data_type.value), expr=self.visit(node.expr, **kwargs)
         )
 
-    def visit_NativeFuncCall(self, node: NativeFuncCall) -> gtir.NativeFuncCall:
+    def visit_NativeFuncCall(self, node: NativeFuncCall, **kwargs: Any) -> gtir.NativeFuncCall:
         return gtir.NativeFuncCall(
             func=self.GT4PY_NATIVE_FUNC_TO_GTIR[node.func],
             args=[self.visit(arg) for arg in node.args],
@@ -257,7 +257,7 @@ class DefIRToGTIR(IRNodeVisitor):
                 else None,
             )
 
-    def visit_AxisIndex(self, node: AxisIndex) -> gtir.AxisIndex:
+    def visit_AxisIndex(self, node: AxisIndex, **kwargs: Any) -> gtir.AxisIndex:
         return gtir.AxisIndex(axis=node.axis)
 
     def visit_For(self, node: For) -> gtir.For:
