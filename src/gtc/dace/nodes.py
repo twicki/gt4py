@@ -47,7 +47,7 @@ class OIRLibraryNode(ABC, dace.nodes.LibraryNode):
 @library.node
 class VerticalLoopLibraryNode(OIRLibraryNode):
     implementations: Dict[str, dace.library.ExpandTransformation] = {}
-    default_implementation = "naive"
+    default_implementation = "block"
 
     loop_order = dace.properties.Property(dtype=LoopOrder, default=None, allow_none=True)
     sections = dace.properties.ListProperty(
@@ -56,6 +56,7 @@ class VerticalLoopLibraryNode(OIRLibraryNode):
     caches = dace.properties.ListProperty(
         element_type=List[CacheDesc], default=[], allow_none=False
     )
+    tile_sizes = dace.properties.ListProperty(element_type=int, default=None, allow_none=True)
 
     _dace_library_name = "oir.VerticalLoop"
 

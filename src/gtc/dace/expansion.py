@@ -28,6 +28,7 @@ from eve.codegen import MakoTemplate as as_mako
 from gtc.common import LoopOrder
 from gtc.dace.nodes import HorizontalExecutionLibraryNode, VerticalLoopLibraryNode
 from gtc.dace.utils import (
+    CartesianIterationSpace,
     array_dimensions,
     get_access_collection,
     get_axis_bound_str,
@@ -172,7 +173,7 @@ class TaskletCodegen(codegen.TemplatedGenerator):
 
 
 class OIRLibraryNodeExpander:
-    def __init__(self, node, parent_state, parent_sdfg):
+    def __init__(self, node, parent_state, parent_sdfg, fix_context_memlets=True):
         self.res_sdfg = dace.SDFG(node.name + "_sdfg")
         self.res_state = self.res_sdfg.add_state(node.name + "_state", is_start_state=True)
 
@@ -197,6 +198,7 @@ class OIRLibraryNodeExpander:
             else:
                 self.context_subsets[name] = edge.data.subset
         self.origins = self.get_origins()
+        self.fix_context_memlets = fix_context_memlets
 
     def get_origins(self):
         raise NotImplementedError("Implement in subclass")
@@ -216,23 +218,29 @@ class OIRLibraryNodeExpander:
 
         in_connectors = set()
         out_connectors = set()
-        for conn in self.node.in_connectors:
-            in_connectors.add(conn[len("IN_") :])
-        for conn in self.node.out_connectors:
-            out_connectors.add(conn[len("OUT_") :])
+        if self.fix_context_memlets:
+            for conn in self.node.in_connectors:
+                in_connectors.add(conn[len("IN_") :])
+            for conn in self.node.out_connectors:
+                out_connectors.add(conn[len("OUT_") :])
 
-        for edge in self.parent_state.in_edges(self.node):
-            if edge.dst_conn is None:
-                continue
-            name = edge.dst_conn[len("IN_") :]
-            edge.data.subset = self.context_subsets[name]
-            edge.dst_conn = name
-        for edge in self.parent_state.out_edges(self.node):
-            if edge.src_conn is None:
-                continue
-            name = edge.src_conn[len("OUT_") :]
-            edge.data.subset = self.context_subsets[name]
-            edge.src_conn = name
+            for edge in self.parent_state.in_edges(self.node):
+                if edge.dst_conn is None:
+                    continue
+                name = edge.dst_conn[len("IN_") :]
+                edge.data.subset = self.context_subsets[name]
+                edge.dst_conn = name
+            for edge in self.parent_state.out_edges(self.node):
+                if edge.src_conn is None:
+                    continue
+                name = edge.src_conn[len("OUT_") :]
+                edge.data.subset = self.context_subsets[name]
+                edge.src_conn = name
+        else:
+            for conn in self.node.in_connectors:
+                in_connectors.add(conn[len("IN_") :])
+            for conn in self.node.out_connectors:
+                out_connectors.add(conn[len("OUT_") :])
 
         return dace.nodes.NestedSDFG(
             self.res_sdfg.name + "_nsdfg",
@@ -378,22 +386,6 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
             if name in access_collection.write_fields():
                 out_subsets[name] = subset_str
         return in_subsets, out_subsets
-
-
-@dace.library.register_expansion(VerticalLoopLibraryNode, "naive")
-class NaiveVerticalLoopExpansion(dace.library.ExpandTransformation):
-    environments: List = []
-
-    @staticmethod
-    def expansion(
-        node: "VerticalLoopLibraryNode", parent_state: dace.SDFGState, parent_sdfg: dace.SDFG
-    ) -> dace.nodes.NestedSDFG:
-        from gtc.common import LoopOrder
-
-        if node.loop_order == LoopOrder.PARALLEL:
-            return ParallelNaiveVerticalLoopExpander(node, parent_state, parent_sdfg).expand()
-        else:
-            return SequentialNaiveVerticalLoopExpander(node, parent_state, parent_sdfg).expand()
 
 
 class SequentialNaiveVerticalLoopExpander(NaiveVerticalLoopExpander):
@@ -590,6 +582,167 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             code=TaskletCodegen.apply(self.node.oir_node),
             external_edges=True,
         )
+
+
+class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
+
+    default_tile_sizes = (32, 32)
+
+    def get_tiled_subset_strs(self, nsdfg, iteration_space):
+        iter_bounds = (iteration_space.i_interval.start, iteration_space.j_interval.start)
+        tile_sizes = self.node.tile_sizes or self.default_tile_sizes
+
+        subset_strs = dict()
+        for name in {*nsdfg.in_connectors, *nsdfg.out_connectors}:
+            array = self.res_sdfg.arrays[name]
+            dims = array_dimensions(array)
+            shape = [
+                dace.symbolic.pystr_to_symbolic(s)
+                .replace(
+                    dace.symbol("__I"),
+                    tile_sizes[0],
+                )
+                .replace(
+                    dace.symbol("__J"),
+                    tile_sizes[1],
+                )
+                for s in array.shape
+            ]
+            subsets = []
+
+            j_idx = 1 if dims[0] else 0
+            fmt = "{tile_var}+{offset}:min({tile_var}+{offset}+{tile_shape}, {all_shape})"
+            if dims[0]:
+                subsets.append(
+                    fmt.format(
+                        tile_var="tile_i",
+                        offset=-iter_bounds[0].offset,
+                        tile_shape=shape[0],
+                        all_shape=array.shape[0],
+                    )
+                )
+            if dims[1]:
+                subsets.append(
+                    fmt.format(
+                        tile_var="tile_j",
+                        offset=-iter_bounds[1].offset,
+                        tile_shape=shape[j_idx],
+                        all_shape=array.shape[j_idx],
+                    )
+                )
+            subsets.extend(f"0:{s}" for s in shape[sum(dims[0:2]) :])
+            subset_strs[name] = ",".join(subsets)
+        return subset_strs
+
+    def device_map(self, nsdfg):
+
+        self.res_state.add_node(nsdfg)
+        self.res_state.add_nested_sdfg
+
+        nsdfg.sdfg.parent = self.res_state
+        nsdfg.sdfg.parent_sdfg = self.res_state.parent
+        nsdfg.sdfg.parent_nsdfg_node = nsdfg
+
+        iteration_space_bounding_box = CartesianIterationSpace.domain()
+        for _, section in self.node.sections:
+            for node in section:
+                if isinstance(node, HorizontalExecutionLibraryNode):
+                    iteration_space_bounding_box = (
+                        iteration_space_bounding_box | node.iteration_space
+                    )
+        i_range = get_interval_range_str(iteration_space_bounding_box.i_interval, "__I")
+        j_range = get_interval_range_str(iteration_space_bounding_box.j_interval, "__J")
+        tile_sizes = self.node.tile_sizes or self.default_tile_sizes
+        ndrange = dict(
+            tile_i=f"{i_range}:{tile_sizes[0]}",
+            tile_j=f"{j_range}:{tile_sizes[1]}",
+        )
+
+        map_entry, map_exit = self.res_state.add_map(self.node.name + "_device_map", ndrange)
+        subset_strs = self.get_tiled_subset_strs(nsdfg, iteration_space_bounding_box)
+        if not nsdfg.in_connectors:
+            self.res_state.add_edge(map_entry, None, nsdfg, None, dace.Memlet())
+        for name in nsdfg.in_connectors:
+            subset_all = ",".join(f"0:{s}" for s in self.res_sdfg.arrays[name].shape)
+            read_node = self.res_state.add_read(name)
+            self.res_state.add_edge_pair(
+                scope_node=map_entry,
+                external_node=read_node,
+                internal_node=nsdfg,
+                internal_connector=name,
+                internal_memlet=dace.Memlet.simple(name, subset_strs[name]),
+                external_memlet=dace.Memlet.simple(name, subset_all),
+                scope_connector=name,
+            )
+        if not nsdfg.out_connectors:
+            self.res_state.add_edge(nsdfg, None, map_exit, None, dace.Memlet())
+        for name in nsdfg.out_connectors:
+            subset_all = ",".join(f"0:{s}" for s in self.res_sdfg.arrays[name].shape)
+            write_node = self.res_state.add_write(name)
+            self.res_state.add_edge_pair(
+                scope_node=map_exit,
+                external_node=write_node,
+                internal_node=nsdfg,
+                internal_connector=name,
+                internal_memlet=dace.Memlet.simple(name, subset_strs[name]),
+                external_memlet=dace.Memlet.simple(name, subset_all),
+                scope_connector=name,
+            )
+        nsdfg.symbol_mapping["__I"] = dace.symbolic.pystr_to_symbolic(
+            f"min({tile_sizes[0]}, __I - tile_i )"
+        )
+        nsdfg.symbol_mapping["__J"] = dace.symbolic.pystr_to_symbolic(
+            f"min({tile_sizes[1]}, __J - tile_j )"
+        )
+
+
+class SequentialBlockLoopExpander(BlockVerticalLoopExpander):
+    def add_nodes_and_edges(self):
+        inner_expander = SequentialNaiveVerticalLoopExpander(
+            self.node, self.parent_state, self.parent_sdfg, fix_context_memlets=False
+        )
+        res_nsdfg = inner_expander.expand()
+        self.device_map(res_nsdfg)
+
+
+class ParallelBlockLoopExpander(BlockVerticalLoopExpander):
+    def add_nodes_and_edges(self):
+        res = ParallelNaiveVerticalLoopExpander(
+            self.node, self.parent_state, self.parent_sdfg, fix_context_memlets=False
+        ).expand()
+        self.device_map(res)
+
+
+@dace.library.register_expansion(VerticalLoopLibraryNode, "naive")
+class NaiveVerticalLoopExpansion(dace.library.ExpandTransformation):
+    environments: List = []
+
+    @staticmethod
+    def expansion(
+        node: "VerticalLoopLibraryNode", parent_state: dace.SDFGState, parent_sdfg: dace.SDFG
+    ) -> dace.nodes.NestedSDFG:
+        from gtc.common import LoopOrder
+
+        if node.loop_order == LoopOrder.PARALLEL:
+            return ParallelNaiveVerticalLoopExpander(node, parent_state, parent_sdfg).expand()
+        else:
+            return SequentialNaiveVerticalLoopExpander(node, parent_state, parent_sdfg).expand()
+
+
+@dace.library.register_expansion(VerticalLoopLibraryNode, "block")
+class BlockVerticalLoopExpansion(dace.library.ExpandTransformation):
+    environments: List = []
+
+    @staticmethod
+    def expansion(
+        node: "VerticalLoopLibraryNode", parent_state: dace.SDFGState, parent_sdfg: dace.SDFG
+    ) -> dace.nodes.NestedSDFG:
+        from gtc.common import LoopOrder
+
+        if node.loop_order == LoopOrder.PARALLEL:
+            return ParallelBlockLoopExpander(node, parent_state, parent_sdfg).expand()
+        else:
+            return SequentialBlockLoopExpander(node, parent_state, parent_sdfg).expand()
 
 
 @dace.library.register_expansion(HorizontalExecutionLibraryNode, "naive")

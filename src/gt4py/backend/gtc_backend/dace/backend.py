@@ -61,7 +61,6 @@ class GTCDaCeExtGenerator:
         sdfg = OirSDFGBuilder().visit(oir)
         sdfg.expand_library_nodes(recursive=True)
         sdfg.apply_strict_transformations(validate=True)
-
         implementation = DaCeComputationCodegen.apply(gtir, sdfg)
         bindings = DaCeBindingsCodegen.apply(
             gtir, sdfg, module_name=self.module_name, backend=self.backend
@@ -129,6 +128,10 @@ class DaCeComputationCodegen:
         code_objects = sdfg.generate_code()
         computations = code_objects[[co.title for co in code_objects].index("Frame")].clean_code
         lines = computations.split("\n")
+        for i, line in reversed(list(enumerate(lines))):
+            if '#include "../../include/hash.h' in line:
+                lines = lines[0:i] + lines[i + 1 :]
+                break
         computations = "\n".join(lines[0:2] + lines[3:])  # remove import of not generated file
         computations = codegen.format_source("cpp", computations, style="LLVM")
         interface = cls.template.definition.render(
