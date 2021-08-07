@@ -212,6 +212,7 @@ class OIRLibraryNodeExpander:
                 shape=subset.bounding_box_size(),
                 strides=strides,
                 dtype=dtype,
+                storage=dace.StorageType.Default,
             )
 
     def fix_context_memlets_and_get_nsdfg(self):
@@ -275,6 +276,12 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
     parent_sdfg: dace.SDFG
     res_sdfg: dace.SDFG
     origins: Dict[str, Tuple[int, int, oir.AxisBound]]
+
+    def add_arrays(self):
+        super().add_arrays()
+        for name, array in self.res_sdfg.arrays.items():
+            if any(c.name == name and isinstance(c, oir.IJCache) for c in self.node.caches):
+                array.storage = self.node.ijcache_storage_type
 
     def get_ij_origins(self):
 
@@ -403,6 +410,7 @@ class SequentialNaiveVerticalLoopExpander(NaiveVerticalLoopExpander):
 
     def add_nodes_and_edges(self):
 
+        self.res_state.nosync = True
         recent_state = self.res_state
         for interval, section in self.node.sections:
             loop_state = self.res_sdfg.add_state(section.name + "_state")
@@ -455,7 +463,9 @@ class ParallelNaiveVerticalLoopExpander(NaiveVerticalLoopExpander):
 
             interval_str = get_interval_range_str(interval, "__K")
             map_entry, map_exit = self.res_state.add_map(
-                section.name + "_map", ndrange={"k": interval_str}
+                section.name + "_map",
+                ndrange={"k": interval_str},
+                schedule=self.node.map_schedule,
             )
 
             section_inputs = set()
@@ -581,6 +591,7 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             output_nodes=output_nodes,
             code=TaskletCodegen.apply(self.node.oir_node),
             external_edges=True,
+            schedule=self.node.map_schedule,
         )
 
 
@@ -658,7 +669,9 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
             tile_j=f"{j_range}:{tile_sizes[1]}",
         )
 
-        map_entry, map_exit = self.res_state.add_map(self.node.name + "_device_map", ndrange)
+        map_entry, map_exit = self.res_state.add_map(
+            self.node.name + "_device_map", ndrange, schedule=self.node.tiling_map_schedule
+        )
         subset_strs = self.get_tiled_subset_strs(nsdfg, iteration_space_bounding_box)
         if not nsdfg.in_connectors:
             self.res_state.add_edge(map_entry, None, nsdfg, None, dace.Memlet())

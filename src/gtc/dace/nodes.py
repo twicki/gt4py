@@ -47,14 +47,27 @@ class OIRLibraryNode(ABC, dace.nodes.LibraryNode):
 @library.node
 class VerticalLoopLibraryNode(OIRLibraryNode):
     implementations: Dict[str, dace.library.ExpandTransformation] = {}
-    default_implementation = "block"
+    default_implementation = "naive"
 
     loop_order = dace.properties.Property(dtype=LoopOrder, default=None, allow_none=True)
     sections = dace.properties.ListProperty(
         element_type=Tuple[Interval, dace.SDFG], default=[], allow_none=False
     )
-    caches = dace.properties.ListProperty(
-        element_type=List[CacheDesc], default=[], allow_none=False
+    caches = dace.properties.ListProperty(element_type=CacheDesc, default=[], allow_none=False)
+    default_storage_type = dace.properties.EnumProperty(
+        dtype=dace.StorageType, default=dace.StorageType.Default
+    )
+    ijcache_storage_type = dace.properties.EnumProperty(
+        dtype=dace.StorageType, default=dace.StorageType.Default
+    )
+    kcache_storage_type = dace.properties.EnumProperty(
+        dtype=dace.StorageType, default=dace.StorageType.Default
+    )
+    tiling_map_schedule = dace.properties.EnumProperty(
+        dtype=dace.ScheduleType, default=dace.ScheduleType.Default
+    )
+    map_schedule = dace.properties.EnumProperty(
+        dtype=dace.ScheduleType, default=dace.ScheduleType.Default
     )
     tile_sizes = dace.properties.ListProperty(element_type=int, default=None, allow_none=True)
 
@@ -151,6 +164,10 @@ class HorizontalExecutionLibraryNode(OIRLibraryNode):
     )
     iteration_space = dace.properties.Property(
         dtype=CartesianIterationSpace, default=None, allow_none=True
+    )
+
+    map_schedule = dace.properties.EnumProperty(
+        dtype=dace.ScheduleType, default=dace.ScheduleType.Default
     )
     _dace_library_name = "oir.HorizontalExecution"
 
