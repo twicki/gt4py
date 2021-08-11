@@ -44,6 +44,14 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         """
     )
 
+    While = as_mako(
+        """
+        while (${cond}) {
+            ${'\\n'.join(body)}
+        }
+        """
+    )
+
     FieldAccess = as_mako("${name}(${offset}${''.join(f', {i}_c' for i in _this_node.data_index)})")
 
     def visit_IJCacheAccess(

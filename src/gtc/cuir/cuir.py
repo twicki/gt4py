@@ -88,6 +88,10 @@ class MaskStmt(Stmt):
     body: List[Stmt]
 
 
+class While(common.While[Stmt, Expr], Stmt):
+    pass
+
+
 class UnaryOp(common.UnaryOp[Expr], Expr):
     pass
 

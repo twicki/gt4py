@@ -28,6 +28,7 @@ from .oir_utils import (
     StencilFactory,
     VerticalLoopFactory,
     VerticalLoopSectionFactory,
+    WhileFactory,
 )
 
 
@@ -288,3 +289,15 @@ def test_assign_to_ik_fwd():
                 ],
             ),
         )
+
+
+def test_loop_mask():
+    StencilFactory(
+        vertical_loops__0=VerticalLoopFactory(
+            sections=[
+                VerticalLoopSectionFactory(
+                    horizontal_executions=[HorizontalExecutionFactory(body=[WhileFactory()])]
+                )
+            ],
+        ),
+    )

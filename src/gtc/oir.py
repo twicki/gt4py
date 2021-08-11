@@ -95,6 +95,10 @@ class NativeFuncCall(common.NativeFuncCall[Expr], Expr):
     _dtype_propagation = common.native_func_call_dtype_propagation(strict=True)
 
 
+class While(common.While[Stmt, Expr], Stmt):
+    pass
+
+
 class Decl(LocNode):
     name: SymbolName
     dtype: common.DataType
