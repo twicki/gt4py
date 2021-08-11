@@ -157,8 +157,8 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                 conditions.append(
                     gt_ir.BinOpExpr(
                         op=gt_ir.BinaryOperator.EQ,
-                        lhs=gt_ir.AxisPosition(axis=axis),
-                        rhs=gt_ir.AxisIndex(
+                        lhs=gt_ir.AxisIndex(axis=axis),
+                        rhs=gt_ir.AxisOffset(
                             axis=axis, endpt=interval.start.level, offset=interval.start.offset
                         ),
                     )
@@ -172,8 +172,8 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     conditions.append(
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.GE,
-                            lhs=gt_ir.AxisPosition(axis=axis),
-                            rhs=gt_ir.AxisIndex(
+                            lhs=gt_ir.AxisIndex(axis=axis),
+                            rhs=gt_ir.AxisOffset(
                                 axis=axis, endpt=interval.start.level, offset=interval.start.offset
                             ),
                         )
@@ -184,8 +184,8 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     conditions.append(
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.LT,
-                            lhs=gt_ir.AxisPosition(axis=axis),
-                            rhs=gt_ir.AxisIndex(
+                            lhs=gt_ir.AxisIndex(axis=axis),
+                            rhs=gt_ir.AxisOffset(
                                 axis=axis, endpt=interval.end.level, offset=interval.end.offset
                             ),
                         )
@@ -495,10 +495,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return (start_splitter, start_offset), (end_splitter, end_offset)
 
-    def visit_AxisPosition(self, node: gt_ir.AxisPosition) -> str:
+    def visit_AxisIndex(self, node: gt_ir.AxisIndex) -> str:
         return f"eval.{node.axis.lower()}()"
 
-    def visit_AxisIndex(self, node: gt_ir.AxisIndex) -> str:
+    def visit_AxisOffset(self, node: gt_ir.AxisOffset) -> str:
         return "static_cast<gt::int_t>({endpt}{offset:+d})".format(
             endpt=f"eval(domain_size_{node.axis.upper()}())"
             if node.endpt == gt_ir.LevelMarker.END
@@ -549,7 +549,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         parallel_axes_names = [axis.name for axis in self.domain.parallel_axes]
         has_horizontal_region = False
-        for pos_node in gt_ir.iter_nodes_of_type(node, gt_ir.AxisPosition):
+        for pos_node in gt_ir.iter_nodes_of_type(node, gt_ir.AxisIndex):
             if pos_node.axis in parallel_axes_names:
                 has_horizontal_region = True
 
@@ -625,7 +625,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             if name not in node.unreferenced
         ]
 
-        positional_computation = len(tuple(gt_ir.iter_nodes_of_type(node, gt_ir.AxisPosition))) > 0
+        positional_computation = len(tuple(gt_ir.iter_nodes_of_type(node, gt_ir.AxisIndex))) > 0
         stage_functors = {}
         for multi_stage in node.multi_stages:
             for group in multi_stage.groups:
@@ -645,11 +645,11 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
-            positional_computation=positional_computation,
             multi_stages=multi_stages,
             parameters=parameters,
             stage_functors=stage_functors,
             stencil_unique_name=self.class_name,
+            positional_computation=positional_computation,
             tmp_fields=tmp_fields,
         )
 

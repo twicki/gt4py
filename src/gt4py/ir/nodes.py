@@ -93,11 +93,11 @@ storing a reference to the piece of source code which originated the node.
 
     Cast(expr: Expr, data_type: DataType)
 
-    AxisPosition(axis: str, data_type: DataType)
+    AxisIndex(axis: str, data_type: DataType)
 
-    AxisIndex(axis: str, endpt: LevelMarker, offset: int, data_type: DataType)
+    AxisOffset(axis: str, endpt: LevelMarker, offset: int, data_type: DataType)
 
-    Expr        = Literal | Ref | NativeFuncCall | Cast | CompositeExpr | InvalidBranch | AxisPosition | AxisIndex
+    Expr        = Literal | Ref | NativeFuncCall | Cast | CompositeExpr | InvalidBranch | AxisIndex | AxisOffset
 
     CompositeExpr   = UnaryOpExpr(op: UnaryOperator, arg: Expr)
                     | BinOpExpr(op: BinaryOperator, lhs: Expr, rhs: Expr)
@@ -405,13 +405,13 @@ class Cast(Expr):
 
 
 @attribclass
-class AxisPosition(Expr):
+class AxisIndex(Expr):
     axis = attribute(of=str)
     data_type = attribute(of=DataType, default=DataType.INT32)
 
 
 @attribclass
-class AxisIndex(Expr):
+class AxisOffset(Expr):
     axis = attribute(of=str)
     endpt = attribute(of=LevelMarker)
     offset = attribute(of=int)
