@@ -41,6 +41,10 @@ class Offset(common.CartesianOffset):
     pass
 
 
+class VariableOffset(common.VariableOffset):
+    pass
+
+
 class Literal(common.Literal, Expr):  # type: ignore
     pass
 
@@ -51,6 +55,12 @@ class LocalAccess(common.ScalarAccess, Expr):  # type: ignore
 
 class AccessorRef(common.FieldAccess, Expr):  # type: ignore
     pass
+
+
+class Positional(Expr):
+    dim: Str
+    dtype = common.DataType.INT32
+    kind = common.ExprKind.SCALAR
 
 
 class BlockStmt(common.BlockStmt[Stmt], Stmt):
@@ -133,6 +143,20 @@ class GTApplyMethod(LocNode):
     local_variables: List[LocalVarDecl]
 
 
+class AxisEndpoint(Expr):
+    axis: int
+    dtype = common.DataType.INT32
+    kind = common.ExprKind.SCALAR
+
+
+class For(Stmt):
+    target_name: Str
+    start: Expr
+    end: Expr
+    inc: int
+    body: BlockStmt
+
+
 @enum.unique
 class Intent(StrEnum):
     IN = "in"
@@ -150,10 +174,11 @@ class GTExtent(LocNode):
 
     def __add__(self, offset: common.CartesianOffset) -> "GTExtent":
         if isinstance(offset, common.CartesianOffset):
+            offsets = offset.to_dict()
             return GTExtent(
-                i=(min(self.i[0], offset.i), max(self.i[1], offset.i)),
-                j=(min(self.j[0], offset.j), max(self.j[1], offset.j)),
-                k=(min(self.k[0], offset.k), max(self.k[1], offset.k)),
+                i=(min(self.i[0], offsets["i"]), max(self.i[1], offsets["i"])),
+                j=(min(self.j[0], offsets["j"]), max(self.j[1], offsets["j"])),
+                k=(min(self.k[0], offsets["k"]), max(self.k[1], offsets["k"])),
             )
         else:
             raise AssertionError("Can only add CartesianOffsets")
@@ -244,12 +269,18 @@ class GTMultiStage(LocNode):
     caches: List[Cache]
 
 
+class Binding(LocNode):
+    name: SymbolName
+    expr: Expr
+
+
 class GTComputationCall(LocNode, SymbolTableTrait):
     # In the generated C++ code `arguments` represent both the arguments in the call to `run`
     # and the parameters of the function object.
     # We could represent this closer to the C++ code by splitting call and definition of the
     # function object.
     arguments: List[Arg]
+    extra_decls: List[Binding]
     temporaries: List[Temporary]
     multi_stages: List[GTMultiStage]
 

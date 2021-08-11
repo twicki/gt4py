@@ -16,7 +16,7 @@
 
 from typing import Any, Dict
 
-from eve import NodeTranslator
+from eve import NodeTranslator, SymbolTableTrait
 from gtc import gtir
 from gtc.common import DataType, GTCPostconditionError
 
@@ -30,6 +30,8 @@ class _GTIRResolveAuto(NodeTranslator):
     Precondition: All dtype are set (not None)
     Postcondition: All dtypes are concrete (no AUTO)
     """
+
+    contexts = (SymbolTableTrait.symtable_merger,)
 
     class _GTIRUpdateAutoDecl(NodeTranslator):
         """Updates FieldDecls with resolved types."""
@@ -62,9 +64,8 @@ class _GTIRResolveAuto(NodeTranslator):
         return gtir.ParAssignStmt(left=left, right=right)
 
     def visit_Stencil(self, node: gtir.Stencil, **kwargs: Any) -> gtir.Stencil:
-        symtable = node.symtable_
-        result = self.generic_visit(node, symtable=symtable)
-        result = self._GTIRUpdateAutoDecl().visit(result, new_symbols=symtable)
+        result = self.generic_visit(node, **kwargs)
+        result = self._GTIRUpdateAutoDecl().visit(result, new_symbols=kwargs["symtable"])
 
         if not all(
             result.iter_tree()
@@ -85,15 +86,22 @@ class _GTIRPropagateDtypeToAccess(NodeTranslator):
     Postcondition: All dtypes of Access are not None
     """
 
+    contexts = (SymbolTableTrait.symtable_merger,)
+
     def visit_FieldAccess(
         self, node: gtir.FieldAccess, *, symtable: Dict[str, Any], **kwargs: Any
     ) -> gtir.FieldAccess:
         return gtir.FieldAccess(
             name=node.name,
-            offset=node.offset,
+            offset=self.visit(node.offset, symtable=symtable),
             data_index=[self.visit(index, symtable=symtable) for index in node.data_index],
             dtype=symtable[node.name].dtype,
         )
+
+    def visit_VariableOffset(
+        self, node: gtir.VariableOffset, *, symtable: Dict[str, Any], **kwargs: Any
+    ) -> gtir.VariableOffset:
+        return gtir.VariableOffset(i=node.i, j=node.j, k=self.visit(node.k, symtable=symtable))
 
     def visit_ScalarAccess(
         self, node: gtir.ScalarAccess, *, symtable: Dict[str, Any], **kwargs: Any
@@ -101,7 +109,7 @@ class _GTIRPropagateDtypeToAccess(NodeTranslator):
         return gtir.ScalarAccess(name=node.name, dtype=symtable[node.name].dtype)
 
     def visit_Stencil(self, node: gtir.Stencil, **kwargs: Any) -> gtir.Stencil:
-        result: gtir.Stencil = self.generic_visit(node, symtable=node.symtable_)
+        result: gtir.Stencil = self.generic_visit(node, **kwargs)
 
         if not all(
             result.iter_tree()

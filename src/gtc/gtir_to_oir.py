@@ -85,6 +85,7 @@ class GTIRToOIR(NodeTranslator):
     ) -> None:
         stmt = oir.AssignStmt(left=self.visit(node.left), right=self.visit(node.right))
         if mask is not None:
+            # Wrap inside MaskStmt
             stmt = oir.MaskStmt(body=[stmt], mask=mask)
         ctx.add_stmt(stmt)
 
@@ -212,9 +213,26 @@ class GTIRToOIR(NodeTranslator):
 
     def visit_Stencil(self, node: gtir.Stencil, **kwargs: Any) -> oir.Stencil:
         ctx = self.Context()
+        vertical_loops = self.visit(node.vertical_loops, ctx=ctx)
         return oir.Stencil(
             name=node.name,
             params=self.visit(node.params),
-            vertical_loops=self.visit(node.vertical_loops, ctx=ctx),
+            vertical_loops=vertical_loops,
             declarations=ctx.decls,
         )
+
+    def visit_AxisIndex(self, node: gtir.AxisIndex) -> oir.AxisIndex:
+        return oir.AxisIndex(axis=node.axis)
+
+    def visit_For(self, node: gtir.For, ctx: Context, **kwargs: Any) -> None:
+        scoped_ctx = ctx.new_scope()
+        self.visit(node.body, ctx=scoped_ctx, **kwargs)
+        stmt = oir.For(
+            target_name=node.target.name,
+            start=self.visit(node.start, **kwargs),
+            end=self.visit(node.end, **kwargs),
+            inc=node.inc,
+            body=scoped_ctx.stmts,
+        )
+        counter_decl = oir.LocalScalar(name=node.target.name, dtype=node.target.dtype)
+        ctx.add_stmt(stmt, declarations=[counter_decl])

@@ -152,7 +152,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
             iteration_order != gt_ir.IterationOrder.PARALLEL or self.block_info.variable_koffsets
         )
 
-        if needs_explicit_kloop:
+        if self.block_info.explicit_K_loop:
             if self.current_k_loop_range != current_k_loop_range:
                 self.current_k_loop_range = current_k_loop_range
                 range_expr = "range({args})".format(args=", ".join(a for a in current_k_loop_range))
@@ -204,8 +204,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
         return source_lines
 
     # ---- Visitor handlers ----
-    def visit_ShapedExpr(self, node: ShapedExpr) -> str:
-        code = self.visit(node.expr)
+    def visit_ShapedExpr(self, node: ShapedExpr, **kwargs) -> str:
+        code = self.visit(node.expr, **kwargs)
         if not isinstance(node.expr, ShapedExpr):
             all_parallel_axes = (
                 self.impl_node.domain.axes
@@ -222,12 +222,13 @@ class NumPySourceGenerator(PythonSourceGenerator):
                 code = f"({code})[{view}]"
         return code
 
-    def visit_FieldRef(self, node: gt_ir.FieldRef) -> str:
+    def visit_FieldRef(self, node: gt_ir.FieldRef, **kwargs) -> str:
+        intervals = kwargs.get("intervals", None)
         assert node.name in self.block_info.accessors
 
+        is_parallel = not self.block_info.explicit_K_loop
         extent = self.block_info.extent
-        lower_extent = list(extent.lower_indices)
-        upper_extent = list(extent.upper_indices)
+
         parallel_axes_names = [
             axis
             for axis in self.impl_node.fields[node.name].axes
@@ -235,26 +236,51 @@ class NumPySourceGenerator(PythonSourceGenerator):
         ]
         parallel_axes_dims = [self.impl_node.domain.index(axis) for axis in parallel_axes_names]
 
-        for d, ax in enumerate(parallel_axes_names):
-            idx = node.offset.get(ax, 0)
-            if idx:
-                lower_extent[d] += idx
-                upper_extent[d] += idx
+        lower_indices = self.block_info.extent.lower_indices
+        upper_indices = self.block_info.extent.upper_indices
 
         index = []
         for fd, d in enumerate(parallel_axes_dims):
-            start_expr = " {:+d}".format(lower_extent[d]) if lower_extent[d] != 0 else ""
-            size_expr = "{dom}[{d}]".format(dom=self.domain_arg_name, d=d)
-            size_expr += " {:+d}".format(upper_extent[d]) if upper_extent[d] != 0 else ""
-            index.append(
-                "{name}{marker}[{fd}]{start}: {name}{marker}[{fd}] + {size}".format(
-                    name=node.name,
-                    start=start_expr,
-                    marker=self.origin_marker,
-                    fd=fd,
-                    size=size_expr,
+            ax = self.domain.axes_names[d]
+            ax_offset = node.offset.get(ax, 0)
+
+            if intervals:
+                restricted_interval = intervals[ax]
+                start_offset = (
+                    max(lower_indices[d], restricted_interval.start.offset)
+                    if restricted_interval.start.level == gt_ir.LevelMarker.START
+                    else restricted_interval.start.offset
                 )
-            )
+                end_offset = (
+                    min(upper_indices[d], restricted_interval.end.offset)
+                    if restricted_interval.end.level == gt_ir.LevelMarker.END
+                    else restricted_interval.end.offset
+                )
+                axis_interval = gt_ir.AxisInterval(
+                    start=gt_ir.AxisBound(
+                        level=restricted_interval.start.level, offset=start_offset
+                    ),
+                    end=gt_ir.AxisBound(level=restricted_interval.end.level, offset=end_offset),
+                )
+            else:
+                axis_interval = gt_ir.AxisInterval(
+                    start=gt_ir.AxisBound(level=gt_ir.LevelMarker.START, offset=lower_indices[d]),
+                    end=gt_ir.AxisBound(level=gt_ir.LevelMarker.END, offset=upper_indices[d]),
+                )
+
+            origin_expr = f"{node.name}{self.origin_marker}[{fd}]"
+            level_to_expr = {
+                gt_ir.LevelMarker.START: origin_expr,
+                gt_ir.LevelMarker.END: f"{origin_expr} + {self.domain_arg_name}[{fd}]",
+            }
+
+            indices = []
+            for bound in (axis_interval.start, axis_interval.end):
+                total_offset = bound.offset + ax_offset
+                total_offset_expr = " {:+d}".format(total_offset) if total_offset != 0 else ""
+                indices.append(f"{level_to_expr[bound.level]}{total_offset_expr}")
+
+            index.append(f"{indices[0]} : {indices[1]}")
 
         k_ax = self.domain.sequential_axis.name
         k_offset = node.offset.get(k_ax, 0)
@@ -332,52 +358,86 @@ class NumPySourceGenerator(PythonSourceGenerator):
     def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral) -> str:
         return str(node.value)
 
-    def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr) -> str:
+    def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs) -> str:
 
         if node.op is gt_ir.UnaryOperator.NOT:
-            source = "np.logical_not({expr})".format(expr=self.visit(node.arg))
+            source = "np.logical_not({expr})".format(expr=self.visit(node.arg, **kwargs))
         else:
             fmt = "({})" if isinstance(node.arg, gt_ir.CompositeExpr) else "{}"
             source = "{op}{expr}".format(
-                op=self.OP_TO_PYTHON[node.op], expr=fmt.format(self.visit(node.arg))
+                op=self.OP_TO_PYTHON[node.op], expr=fmt.format(self.visit(node.arg, **kwargs))
             )
 
         return source
 
-    def visit_BinOpExpr(self, node: gt_ir.BinOpExpr) -> str:
+    def visit_BinOpExpr(self, node: gt_ir.BinOpExpr, **kwargs) -> str:
         if node.op is gt_ir.BinaryOperator.AND:
             source = "np.logical_and({lhs}, {rhs})".format(
-                lhs=self.visit(node.lhs), rhs=self.visit(node.rhs)
+                lhs=self.visit(node.lhs, **kwargs), rhs=self.visit(node.rhs, **kwargs)
             )
         elif node.op is gt_ir.BinaryOperator.OR:
             source = "np.logical_or({lhs}, {rhs})".format(
-                lhs=self.visit(node.lhs), rhs=self.visit(node.rhs)
+                lhs=self.visit(node.lhs, **kwargs), rhs=self.visit(node.rhs, **kwargs)
             )
         else:
             lhs_fmt = "({})" if isinstance(node.lhs, gt_ir.CompositeExpr) else "{}"
             rhs_fmt = "({})" if isinstance(node.rhs, gt_ir.CompositeExpr) else "{}"
             source = "{lhs} {op} {rhs}".format(
-                lhs=lhs_fmt.format(self.visit(node.lhs)),
+                lhs=lhs_fmt.format(self.visit(node.lhs, **kwargs)),
                 op=self.OP_TO_PYTHON[node.op],
-                rhs=rhs_fmt.format(self.visit(node.rhs)),
+                rhs=rhs_fmt.format(self.visit(node.rhs, **kwargs)),
             )
 
         return source
 
-    def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr) -> str:
+    def visit_TernaryOpExpr(self, node: gt_ir.TernaryOpExpr, **kwargs) -> str:
         then_fmt = "({})" if isinstance(node.then_expr, gt_ir.CompositeExpr) else "{}"
         else_fmt = "({})" if isinstance(node.else_expr, gt_ir.CompositeExpr) else "{}"
 
         source = "{np}.where({condition}, {then_expr}, {else_expr})".format(
             np=self.numpy_prefix,
-            condition=self.visit(node.condition),
-            then_expr=then_fmt.format(self.visit(node.then_expr)),
-            else_expr=else_fmt.format(self.visit(node.else_expr)),
+            condition=self.visit(node.condition, **kwargs),
+            then_expr=then_fmt.format(self.visit(node.then_expr, **kwargs)),
+            else_expr=else_fmt.format(self.visit(node.else_expr, **kwargs)),
         )
 
         return source
 
-    def _visit_branch_stmt(self, stmt: gt_ir.Statement) -> List[str]:
+    def _visit_ForLoopBound(self, node: gt_ir.AxisBound, axis: int) -> str:
+        if node.level == gt_ir.LevelMarker.START:
+            return str(node.offset)
+        elif node.level == gt_ir.LevelMarker.END:
+            return f"_domain_[2] + {node.offset}"
+        else:
+            return f"domain[{axis}] + {node.offset}"
+
+    def visit_For(self, node: gt_ir.For) -> List[str]:
+        self.block_info.explicit_K_loop = True
+        k_ax = gt_ir.Domain.LatLonGrid().sequential_axis
+        k_index = gt_ir.Domain.LatLonGrid().index(k_ax)
+
+        sources = []
+        if isinstance(node.start, gt_ir.AxisBound):
+            start = self._visit_ForLoopBound(node.start, k_index)
+        else:
+            start = self.visit(node.start)
+        if isinstance(node.stop, gt_ir.AxisBound):
+            stop = self._visit_ForLoopBound(node.stop, k_index)
+        else:
+            stop = self.visit(node.stop)
+        if isinstance(node.step, int) and node.step > 0:
+            step = node.step
+            sources.append(f"for {node.target.name} in range({start},{stop},{step}):")
+        else:
+            sources.append(f"for {node.target.name} in range({start},{stop}):")
+        for stmt in node.body.stmts:
+            sources.append(self.indent_size * " " + self.visit(stmt))
+        return sources
+
+    def visit_AxisIndex(self, node: gt_ir.AxisIndex):
+        return node.axis
+
+    def _visit_branch_stmt(self, stmt: gt_ir.Statement, **kwargs: Any) -> List[str]:
         sources = []
         if isinstance(stmt, gt_ir.Assign):
             condition = "__condition_1"
@@ -388,8 +448,8 @@ class NumPySourceGenerator(PythonSourceGenerator):
                     inner_condition="__condition_{level}".format(level=i + 1),
                 )
 
-            target = self.visit(stmt.target)
-            value = self.visit(stmt.value)
+            target = self.visit(stmt.target, **kwargs)
+            value = self.visit(stmt.value, **kwargs)
 
             # Check if this temporary variable / field already contains written information.
             # If it does, it needs to be the else expression of the where, otherwise we set the else to nan.
@@ -406,7 +466,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
                     condition=condition,
                     target=target,
                     then_expr=value,
-                    else_expr=target if is_possible_else else "np.nan",
+                    else_expr=target if is_possible_else else f"{self.numpy_prefix}.nan",
                 )
             )
 
@@ -414,7 +474,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
                 self.var_refs_defined.add(target_expr.name)
 
         else:
-            stmt_sources = self.visit(stmt)
+            stmt_sources = self.visit(stmt, **kwargs)
             if isinstance(stmt_sources, list):
                 sources.extend(stmt_sources)
             else:
@@ -422,28 +482,39 @@ class NumPySourceGenerator(PythonSourceGenerator):
 
         return sources
 
-    def visit_If(self, node: gt_ir.If) -> List[str]:
+    def visit_If(self, node: gt_ir.If, **kwargs) -> List[str]:
         sources = []
         self.conditions_depth += 1
         sources.append(
             "__condition_{level} = {condition}".format(
-                level=self.conditions_depth, condition=self.visit(node.condition)
+                level=self.conditions_depth, condition=self.visit(node.condition, **kwargs)
             )
         )
 
         for stmt in node.main_body.stmts:
-            sources.extend(self._visit_branch_stmt(stmt))
+            sources.extend(self._visit_branch_stmt(stmt, **kwargs))
         if node.else_body is not None:
             sources.append(
                 "__condition_{level} = np.logical_not(__condition_{level})".format(
-                    level=self.conditions_depth, condition=self.visit(node.condition)
+                    level=self.conditions_depth, condition=self.visit(node.condition, **kwargs)
                 )
             )
             for stmt in node.else_body.stmts:
-                sources.extend(self._visit_branch_stmt(stmt))
+                sources.extend(self._visit_branch_stmt(stmt, **kwargs))
 
         self.conditions_depth -= 1
         # return "\n".join(sources)
+        return sources
+
+    def visit_HorizontalIf(self, node: gt_ir.HorizontalIf, **kwargs) -> List[str]:
+        sources = []
+        for stmt in node.body.stmts:
+            stmt_source = self.visit(stmt, intervals=node.intervals, **kwargs)
+            if isinstance(stmt_source, list):
+                sources.extend(stmt_source)
+            else:
+                sources.append(stmt_source)
+
         return sources
 
     def visit_While(self, node: gt_ir.While) -> List[str]:

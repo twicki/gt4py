@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import collections.abc
+import contextlib
 import copy
 import operator
 
@@ -28,14 +29,20 @@ from .concepts import NOTHING
 from .typingx import (
     Any,
     Callable,
+    ClassVar,
     Collection,
+    ContextManager,
     Dict,
     Iterable,
     MutableSequence,
     MutableSet,
+    Optional,
     Tuple,
     Union,
 )
+
+
+ContextCallable = Callable[["NodeVisitor", concepts.TreeNode, Dict[str, Any]], ContextManager[None]]
 
 
 class NodeVisitor:
@@ -102,6 +109,15 @@ class NodeVisitor:
 
     """
 
+    contexts: ClassVar[Optional[Tuple[ContextCallable, ...]]] = None
+
+    def _do_visit(self, node: concepts.TreeNode, method, **kwargs: Any) -> Any:
+        with contextlib.ExitStack() as stack:
+            for ctx in self.contexts or []:
+                stack.enter_context(ctx(self, node, kwargs))
+
+            return method(node, **kwargs)
+
     def visit(self, node: concepts.TreeNode, **kwargs: Any) -> Any:
         visitor = self.generic_visit
 
@@ -118,7 +134,7 @@ class NodeVisitor:
                 if node_class is concepts.Node:
                     break
 
-        return visitor(node, **kwargs)
+        return self._do_visit(node, visitor, **kwargs)
 
     def generic_visit(self, node: concepts.TreeNode, **kwargs: Any) -> Any:
         for child in iterators.generic_iter_children(node):

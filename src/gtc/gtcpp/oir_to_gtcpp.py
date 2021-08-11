@@ -16,13 +16,13 @@
 
 import itertools
 from dataclasses import dataclass, field
-from typing import Any, List, Set, Union
+from typing import Any, Dict, List, Set, Union
 
 from devtools import debug  # noqa: F401
 
 import eve
 from gtc import common, oir
-from gtc.common import CartesianOffset
+from gtc.common import CartesianOffset, VariableOffset
 from gtc.gtcpp import gtcpp
 
 
@@ -31,15 +31,20 @@ from gtc.gtcpp import gtcpp
 
 
 def _extract_accessors(node: eve.Node) -> List[gtcpp.GTAccessor]:
-    extents = (
+    def _check_extent(extent):
+        if extent[1].k[1] == VariableOffset.LARGE_NUM:
+            extent[1].k = (-extent[1].k[1], extent[1].k[1])
+        return extent
+
+    extents = dict(
         node.iter_tree()
         .if_isinstance(gtcpp.AccessorRef)
         .reduceby(
             (lambda extent, accessor_ref: extent + accessor_ref.offset),
             "name",
             init=gtcpp.GTExtent.zero(),
-            as_dict=True,
         )
+        .map(_check_extent)
     )
 
     inout_fields: Set[str] = (
@@ -81,6 +86,8 @@ class OIRToGTCpp(eve.NodeTranslator):
     class GTComputationContext:
         temporaries: List[gtcpp.Temporary] = field(default_factory=list)
         arguments: Set[gtcpp.Arg] = field(default_factory=set)
+        axis_indices: Dict[str, str] = field(default_factory=dict)
+        axis_endpoints: Dict[str, str] = field(default_factory=dict)
 
         def add_temporaries(
             self, temporaries: List[gtcpp.Temporary]
@@ -91,6 +98,16 @@ class OIRToGTCpp(eve.NodeTranslator):
         def add_arguments(self, arguments: Set[gtcpp.Arg]) -> "OIRToGTCpp.GTComputationContext":
             self.arguments.update(arguments)
             return self
+
+        def add_axis_index(self, axis: str) -> "OIRToGTCpp.GTComputationContext":
+            self.axis_indices[axis] = f"{axis.lower()}_pos"
+            return self
+
+        def add_axis_endpoint(self, axis: str) -> "OIRToGTCpp.GTComputationContext":
+            self.axis_endpoints[axis] = f"{axis.lower()}_length"
+            return self
+
+    contexts = (eve.SymbolTableTrait.symtable_merger,)
 
     def visit_Literal(self, node: oir.Literal, **kwargs: Any) -> gtcpp.Literal:
         return gtcpp.Literal(value=node.value, dtype=node.dtype)
@@ -126,6 +143,11 @@ class OIRToGTCpp(eve.NodeTranslator):
     ) -> common.CartesianOffset:
         return node
 
+    def visit_VariableOffset(
+        self, node: common.VariableOffset, **kwargs: Any
+    ) -> gtcpp.VariableOffset:
+        return gtcpp.VariableOffset(i=node.i, j=node.j, k=self.visit(node.k, **kwargs))
+
     def visit_FieldAccess(self, node: oir.FieldAccess, **kwargs: Any) -> gtcpp.AccessorRef:
         return gtcpp.AccessorRef(
             name=node.name,
@@ -140,9 +162,9 @@ class OIRToGTCpp(eve.NodeTranslator):
     def visit_ScalarAccess(
         self, node: oir.ScalarAccess, **kwargs: Any
     ) -> Union[gtcpp.AccessorRef, gtcpp.LocalAccess]:
-        assert "stencil_symtable" in kwargs
-        if node.name in kwargs["stencil_symtable"]:
-            symbol = kwargs["stencil_symtable"][node.name]
+        assert "symtable" in kwargs
+        if node.name in kwargs["symtable"]:
+            symbol = kwargs["symtable"][node.name]
             if isinstance(symbol, oir.ScalarDecl):
                 return gtcpp.AccessorRef(
                     name=symbol.name, offset=CartesianOffset.zero(), dtype=symbol.dtype
@@ -170,7 +192,7 @@ class OIRToGTCpp(eve.NodeTranslator):
         )
 
     def visit_AssignStmt(self, node: oir.AssignStmt, **kwargs: Any) -> gtcpp.AssignStmt:
-        assert "stencil_symtable" in kwargs
+        assert "symtable" in kwargs
         return gtcpp.AssignStmt(
             left=self.visit(node.left, **kwargs), right=self.visit(node.right, **kwargs)
         )
@@ -185,6 +207,55 @@ class OIRToGTCpp(eve.NodeTranslator):
         body = self.visit(node.body, **kwargs)
         return gtcpp.While(cond=cond, body=body)
 
+    def visit_AxisIndex(
+        self, node: oir.AxisIndex, *, comp_ctx: GTComputationContext, **kwargs: Any
+    ) -> gtcpp.AccessorRef:
+        comp_ctx.add_axis_index(node.axis)
+        return gtcpp.AccessorRef(
+            name=comp_ctx.axis_indices[node.axis],
+            offset=common.CartesianOffset.zero(),
+            dtype=common.DataType.INT32,
+        )
+
+    def visit_For(
+        self, node: oir.For, *, comp_ctx: GTComputationContext, **kwargs: Any
+    ) -> gtcpp.For:
+        def lower_axis_bound(axis_bound: oir.AxisBound) -> gtcpp.Expr:
+            offset_literal = gtcpp.Literal(
+                value=str(axis_bound.offset), dtype=common.DataType.INT32
+            )
+            if axis_bound.level == common.LevelMarker.START:
+                return offset_literal
+            else:
+                axis = "K"
+                comp_ctx.add_axis_endpoint(axis)
+                endpt = gtcpp.AccessorRef(
+                    name=comp_ctx.axis_endpoints[axis],
+                    offset=common.CartesianOffset.zero(),
+                    dtype=common.DataType.INT32,
+                )
+                return (
+                    gtcpp.BinaryOp(
+                        op=common.ArithmeticOperator.ADD, left=endpt, right=offset_literal
+                    )
+                    if axis_bound.offset != 0
+                    else endpt
+                )
+
+        def make_bound(endpt: Union[oir.Expr, common.AxisBound], **kwargs: Any) -> gtcpp.Expr:
+            if isinstance(endpt, oir.Expr):
+                return self.visit(endpt, comp_ctx=comp_ctx, **kwargs)
+            else:
+                return lower_axis_bound(endpt)
+
+        return gtcpp.For(
+            target_name=node.target_name,
+            start=make_bound(node.start, **kwargs),
+            end=make_bound(node.end, **kwargs),
+            inc=node.inc,
+            body=gtcpp.BlockStmt(body=self.visit(node.body, **kwargs)),
+        )
+
     def visit_HorizontalExecution(
         self,
         node: oir.HorizontalExecution,
@@ -194,10 +265,10 @@ class OIRToGTCpp(eve.NodeTranslator):
         interval: gtcpp.GTInterval,
         **kwargs: Any,
     ) -> gtcpp.GTStage:
-        assert "stencil_symtable" in kwargs
+        assert "symtable" in kwargs
         apply_method = gtcpp.GTApplyMethod(
             interval=self.visit(interval, **kwargs),
-            body=self.visit(node.body, **kwargs),
+            body=self.visit(node.body, comp_ctx=comp_ctx, **kwargs),
             local_variables=self.visit(node.declarations, **kwargs),
         )
         accessors = _extract_accessors(apply_method)
@@ -273,14 +344,22 @@ class OIRToGTCpp(eve.NodeTranslator):
 
         multi_stages = self.visit(
             node.vertical_loops,
-            stencil_symtable=node.symtable_,
             prog_ctx=prog_ctx,
             comp_ctx=comp_ctx,
             **kwargs,
         )
 
+        bindings = [
+            gtcpp.Binding(name=name, expr=gtcpp.Positional(dim=axis.lower()))
+            for axis, name in comp_ctx.axis_indices.items()
+        ] + [
+            gtcpp.Binding(name=name, expr=gtcpp.AxisEndpoint(axis={"I": 0, "J": 1, "K": 2}[axis]))
+            for axis, name in comp_ctx.axis_endpoints.items()
+        ]
+
         gt_computation = gtcpp.GTComputationCall(
             arguments=comp_ctx.arguments,
+            extra_decls=bindings,
             temporaries=comp_ctx.temporaries,
             multi_stages=multi_stages,
         )
