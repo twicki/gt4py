@@ -139,7 +139,7 @@ class GTIRToOIR(NodeTranslator):
         combined_mask = current_mask
         if mask:
             combined_mask = oir.BinaryOp(op=LogicalOperator.AND, left=mask, right=combined_mask)
-        self.visit(node.true_branch.body, mask=combined_mask, ctx=ctx)
+        self.visit(node.true_branch.body, ctx=ctx, mask=combined_mask)
 
         if node.false_branch:
             combined_mask = oir.UnaryOp(op=UnaryOperator.NOT, expr=current_mask)
@@ -147,8 +147,8 @@ class GTIRToOIR(NodeTranslator):
                 combined_mask = oir.BinaryOp(op=LogicalOperator.AND, left=mask, right=combined_mask)
             self.visit(
                 node.false_branch.body,
-                mask=combined_mask,
                 ctx=ctx,
+                mask=combined_mask,
             )
 
     # For now we represent ScalarIf (and FieldIf) both as masks on the HorizontalExecution.
@@ -161,15 +161,15 @@ class GTIRToOIR(NodeTranslator):
         if mask:
             combined_mask = oir.BinaryOp(op=LogicalOperator.AND, left=mask, right=current_mask)
 
-        self.visit(node.true_branch.body, mask=combined_mask, ctx=ctx)
+        self.visit(node.true_branch.body, ctx=ctx, mask=combined_mask)
         if node.false_branch:
             combined_mask = oir.UnaryOp(op=UnaryOperator.NOT, expr=current_mask)
             if mask:
                 combined_mask = oir.BinaryOp(op=LogicalOperator.AND, left=mask, right=combined_mask)
             self.visit(
                 node.false_branch.body,
-                mask=combined_mask,
                 ctx=ctx,
+                mask=combined_mask,
             )
 
     def visit_While(
@@ -182,6 +182,20 @@ class GTIRToOIR(NodeTranslator):
         scoped_ctx = ctx.new_scope()
         self.visit(node.body, mask=combined_mask, ctx=scoped_ctx)
         ctx.add_stmt(oir.While(cond=combined_mask, body=scoped_ctx.stmts))
+
+    def visit_HorizontalMask(self, node: gtir.HorizontalMask) -> oir.HorizontalMask:
+        return oir.HorizontalMask(i=node.i, j=node.j)
+
+    def visit_HorizontalRegion(
+        self, node: gtir.HorizontalRegion, *, mask: oir.Expr = None, ctx: Context, **kwargs: Any
+    ) -> None:
+        current_mask = self.visit(node.mask)
+        combined_mask = (
+            oir.BinaryOf(op=LogicalOperator.AND, left=mask, right=current_mask)
+            if mask
+            else current_mask
+        )
+        return self.visit(node.block.body, mask=combined_mask, ctx=ctx)
 
     def visit_Interval(self, node: gtir.Interval, **kwargs: Any) -> oir.Interval:
         return oir.Interval(
