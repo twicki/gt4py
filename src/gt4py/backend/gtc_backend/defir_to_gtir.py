@@ -184,8 +184,7 @@ class DefIRToGTIR(IRNodeVisitor):
 
     def visit_Assign(self, node: Assign) -> gtir.ParAssignStmt:
         assert isinstance(node.target, FieldRef) or isinstance(node.target, VarRef)
-        left = self.visit(node.target)
-        return gtir.ParAssignStmt(left=left, right=self.visit(node.value))
+        return gtir.ParAssignStmt(left=self.visit(node.target), right=self.visit(node.value))
 
     def visit_ScalarLiteral(self, node: ScalarLiteral) -> gtir.Literal:
         return gtir.Literal(value=str(node.value), dtype=common.DataType(node.data_type.value))
@@ -230,8 +229,16 @@ class DefIRToGTIR(IRNodeVisitor):
         )
 
     def visit_FieldRef(self, node: FieldRef) -> gtir.FieldAccess:
+        data_index = [
+            gtir.Literal(value=str(index), dtype=common.DataType.INT64)
+            if isinstance(index, int)
+            else self.visit(index)
+            for index in node.data_index
+        ]
         return gtir.FieldAccess(
-            name=node.name, offset=transform_offset(node.offset), data_index=node.data_index
+            name=node.name,
+            offset=transform_offset(node.offset),
+            data_index=data_index,
         )
 
     def visit_If(self, node: If) -> Union[gtir.FieldIfStmt, gtir.ScalarIfStmt]:
