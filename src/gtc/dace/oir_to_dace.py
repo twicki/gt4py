@@ -307,7 +307,6 @@ class BaseOirSDFGBuilder(ABC):
                     shape=shapes[name],
                     strides=strides,
                     transient=isinstance(decl, Temporary) and self.has_transients,
-                    lifetime=dace.AllocationLifetime.Persistent,
                 )
 
     def add_subsets(self):
