@@ -355,7 +355,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
 
         super().visit_StencilImplementation(node)
 
-    def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral) -> str:
+    def visit_ScalarLiteral(self, node: gt_ir.ScalarLiteral, **kwargs) -> str:
         return str(node.value)
 
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs) -> str:
