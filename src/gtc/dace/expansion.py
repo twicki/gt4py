@@ -410,8 +410,8 @@ class SequentialNaiveVerticalLoopExpander(NaiveVerticalLoopExpander):
 
     def add_nodes_and_edges(self):
 
-        self.res_state.nosync = True
         recent_state = self.res_state
+        self.res_sdfg.add_symbol("k", stype=dace.int32)
         for interval, section in self.node.sections:
             loop_state = self.res_sdfg.add_state(section.name + "_state")
             _, _, recent_state = self.res_sdfg.add_loop(
@@ -656,7 +656,7 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
 
         iteration_space_bounding_box = CartesianIterationSpace.domain()
         for _, section in self.node.sections:
-            for node in section:
+            for node, _ in section.all_nodes_recursive():
                 if isinstance(node, HorizontalExecutionLibraryNode):
                     iteration_space_bounding_box = (
                         iteration_space_bounding_box | node.iteration_space

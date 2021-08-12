@@ -70,8 +70,7 @@ def get_reference(test_name, backend, domain, origins, shapes, masks=None):
 
 
 @register
-# @hyp.given(domain=hyp_st.tuples(*([hyp_st.integers(min_value=1, max_value=8)] * 3)))
-@hyp.given(domain=hyp_st.tuples(*([hyp_st.integers(min_value=32, max_value=32)] * 3)))
+@hyp.given(domain=hyp_st.tuples(*([hyp_st.integers(min_value=1, max_value=8)] * 3)))
 def run_horizontal_diffusion(backend, id_version, domain):
 
     validate_field_names = ["out_field"]
@@ -139,9 +138,11 @@ def run_tridiagonal_solver(backend, id_version, domain):
     testmodule = generate_test_module(
         "tridiagonal_solver", backend, id_version=id_version, rebuild=False
     )
+
     for k in arg_fields:
         if hasattr(arg_fields[k], "host_to_device"):
             arg_fields[k].host_to_device()
+
     testmodule.run(
         **arg_fields,
         _domain_=domain,
@@ -200,9 +201,6 @@ def run_vertical_advection_dycore(backend, id_version, domain):
         **arg_fields,
         _domain_=domain,
         _origin_=origins,
-        # _origin_={
-        #    k: [oo[0] if isinstance(oo, tuple) else oo for oo in o] for k, o in origins.items()
-        # },
         exec_info=None,
     )
 
