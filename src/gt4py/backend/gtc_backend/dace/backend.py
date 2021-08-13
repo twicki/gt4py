@@ -95,6 +95,7 @@ def expand_and_wrap_sdfg(gtir: gtir.Stencil, inner_sdfg: dace.SDFG) -> dace.SDFG
             strides=inner_sdfg.arrays[name].strides,
             shape=shape,
             dtype=inner_sdfg.arrays[name].dtype,
+            storage=inner_sdfg.arrays[name].storage,
         )
 
         subset_strs[name] = ",".join(
@@ -159,7 +160,6 @@ class GTCDaCeExtGenerator:
                     node.default_storage_type = dace.StorageType.GPU_Global
                     node.map_schedule = dace.ScheduleType.Sequential
                     node.tiling_map_schedule = dace.ScheduleType.GPU_Device
-                    node.tile_sizes = [32, 32]
                     for _, section in node.sections:
                         for array in section.arrays.values():
                             array.storage = dace.StorageType.GPU_Global
@@ -177,9 +177,9 @@ class GTCDaCeExtGenerator:
         oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(skip=[FillFlushToLocalKCaches])
         sdfg = OirSDFGBuilder().visit(oir)
 
-        sdfg = expand_and_wrap_sdfg(gtir, sdfg)
-
         self.to_device(sdfg)
+
+        sdfg = expand_and_wrap_sdfg(gtir, sdfg)
 
         for tmp_sdfg in sdfg.all_sdfgs_recursive():
             tmp_sdfg.transformation_hist = []
@@ -192,6 +192,7 @@ class GTCDaCeExtGenerator:
         )
 
         sdfg.apply_strict_transformations(validate=False)
+        sdfg.save(f"{sdfg.name}.sdfg")
         with dace.config.set_temporary("compiler", "cuda", "max_concurrent_streams", value=-1):
             implementation = DaCeComputationCodegen.apply(gtir, sdfg)
 
