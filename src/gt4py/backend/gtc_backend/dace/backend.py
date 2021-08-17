@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from gt4py.stencil_object import StencilObject
 
 
-def expand_and_wrap_sdfg(gtir: gtir.Stencil, inner_sdfg: dace.SDFG) -> dace.SDFG:
+def expand_and_wrap_sdfg(gtir: gtir.Stencil, inner_sdfg: dace.SDFG) -> dace.SDFG:  # noqa: C901
     wrapper_sdfg = dace.SDFG(inner_sdfg.name + "_offset_wrapper")
     wrapper_state = wrapper_sdfg.add_state(inner_sdfg.name + "_offset_wrapper_state")
 
@@ -64,6 +64,21 @@ def expand_and_wrap_sdfg(gtir: gtir.Stencil, inner_sdfg: dace.SDFG) -> dace.SDFG
 
     inner_sdfg.expand_library_nodes(recursive=True)
     inner_sdfg.apply_strict_transformations()
+
+    state = inner_sdfg.node(0)
+    sdict = state.scope_children()
+    for mapnode in sdict[None]:
+        if not isinstance(mapnode, dace.nodes.MapEntry):
+            continue
+        inner_maps = [n for n in sdict[mapnode] if isinstance(n, dace.nodes.MapEntry)]
+        if len(inner_maps) != 1:
+            continue
+        inner_map = inner_maps[0]
+        if "k" in inner_map.params:
+            res_entry, _ = MapCollapse.apply_to(
+                inner_sdfg, _outer_map_entry=mapnode, _inner_map_entry=inner_map, save=False
+            )
+            res_entry.schedule = dace.ScheduleType.GPU_Device
 
     extents = compute_legacy_extents(gtir, allow_negative=True)
 

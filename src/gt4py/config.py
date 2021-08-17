@@ -73,3 +73,4 @@ cache_settings: Dict[str, Any] = {
 code_settings: Dict[str, Any] = {"root_package_name": "_GT_"}
 
 os.environ.setdefault("DACE_CONFIG", os.path.join(os.path.abspath("."), ".dace.conf"))
+os.environ.setdefault("DACE_store_history", "0")

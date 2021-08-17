@@ -601,7 +601,7 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
 class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
 
-    default_tile_sizes = (32, 32)
+    default_tile_sizes = (4, 32)
 
     def get_tiled_subset_strs(self, nsdfg, iteration_space):
         iter_bounds = (iteration_space.i_interval.start, iteration_space.j_interval.start)
