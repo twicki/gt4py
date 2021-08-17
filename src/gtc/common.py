@@ -15,6 +15,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import enum
+import functools
 from typing import (
     Any,
     Callable,
@@ -336,6 +337,49 @@ class VariableOffset(CartesianOffset):
         if k and k.dtype not in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64):
             raise ValueError("Variable k-offset must have an integer type")
         return k
+
+
+class IJExtent(LocNode):
+    i: Tuple[int, int]
+    j: Tuple[int, int]
+
+    @classmethod
+    def zero(cls) -> "IJExtent":
+        return cls(i=(0, 0), j=(0, 0))
+
+    @classmethod
+    def from_offset(cls, offset: CartesianOffset) -> "IJExtent":
+        return cls(i=(offset.i, offset.i), j=(offset.j, offset.j))
+
+    def _apply(
+        self,
+        other: "IJExtent",
+        *,
+        lower_op: Callable[[int, int], int],
+        upper_op: Callable[[int, int], int],
+    ) -> "IJExtent":
+        return IJExtent(
+            i=(lower_op(self.i[0], other.i[0]), upper_op(self.i[1], other.i[1])),
+            j=(lower_op(self.j[0], other.j[0]), upper_op(self.j[1], other.j[1])),
+        )
+
+    def __add__(self, other: "IJExtent") -> "IJExtent":
+        return self._apply(other, lower_op=lambda x, y: x + y, upper_op=lambda x, y: x + y)
+
+    def __sub__(self, other: "IJExtent") -> "IJExtent":
+        return self._apply(other, lower_op=lambda x, y: x - y, upper_op=lambda x, y: x - y)
+
+    def union(self, *extents: "IJExtent") -> "IJExtent":
+        return functools.reduce(
+            lambda this, other: this._apply(
+                other, lower_op=lambda x, y: min(x, y), upper_op=lambda x, y: max(x, y)
+            ),
+            extents,
+            self,
+        )
+
+    def __or__(self, other: "IJExtent") -> "IJExtent":
+        return self.union(other)
 
 
 class ScalarAccess(LocNode):
@@ -780,37 +824,6 @@ class AxisBound(Node):
         if not isinstance(other, AxisBound):
             return NotImplemented
         return not self < other
-
-
-class IJExtent(LocNode):
-    i: Tuple[int, int]
-    j: Tuple[int, int]
-
-    @classmethod
-    def zero(cls) -> "IJExtent":
-        return cls(i=(0, 0), j=(0, 0))
-
-    @classmethod
-    def from_offset(cls, offset: CartesianOffset) -> "IJExtent":
-        return cls(i=(offset.i, offset.i), j=(offset.j, offset.j))
-
-    def union(*extents: "IJExtent") -> "IJExtent":
-        return IJExtent(
-            i=(min(e.i[0] for e in extents), max(e.i[1] for e in extents)),
-            j=(min(e.j[0] for e in extents), max(e.j[1] for e in extents)),
-        )
-
-    def _apply(self, other: "IJExtent", op: Callable[[int, int], int]) -> "IJExtent":
-        return IJExtent(
-            i=(op(self.i[0], other.i[0]), op(self.i[1], other.i[1])),
-            j=(op(self.j[0], other.j[0]), op(self.j[1], other.j[1])),
-        )
-
-    def __add__(self, other: "IJExtent") -> "IJExtent":
-        return self._apply(other, op=lambda x, y: x + y)
-
-    def __sub__(self, other: "IJExtent") -> "IJExtent":
-        return self._apply(other, op=lambda x, y: x - y)
 
 
 class HorizontalInterval(Node):
