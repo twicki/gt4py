@@ -50,8 +50,8 @@ class BaseOirSDFGBuilder(ABC):
 
     def __init__(self, name, stencil: Stencil, nodes):
         self._stencil = stencil
-        self._sdfg = SDFG(name)
-        self._state = self._sdfg.add_state(name + "_state")
+        self._sdfg = SDFG(name + "_trimmed")
+        self._state = self._sdfg.add_state(name + "_trimmed_state")
         for node in nodes:
             self._state.add_node(node)
         self._extents = nodes_extent_calculation(nodes)
