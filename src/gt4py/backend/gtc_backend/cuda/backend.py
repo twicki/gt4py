@@ -55,8 +55,7 @@ class GTCCudaExtGenerator:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
             skip=[
-                # graph_merge_horizontal_executions,
-                GreedyMerging,
+                graph_merge_horizontal_executions,
                 OnTheFlyMerging,
                 KCacheDetection,
                 NoFieldAccessPruning
