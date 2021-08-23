@@ -98,8 +98,6 @@ __all__ = list(builtins) + ["function", "stencil", "lazy_stencil"]
 
 __externals__ = "Placeholder"
 __gtscript__ = "Placeholder"
-horizontal = "Placeholder"
-region = "Placeholder"
 
 _VALID_DATA_TYPES = (
     bool,
@@ -645,7 +643,7 @@ class AxisIndex:
         if not isinstance(offset, numbers.Integral) and not isinstance(offset, AxisIndex):
             raise TypeError("Offset should be an integer type or axis index")
         if isinstance(offset, AxisIndex):
-            if not self.axis == other.axis:
+            if not self.axis == offset.axis:
                 raise ValueError("Only AxisIndex with same axis can be added.")
             offset = offset.offset
         if offset == 0:

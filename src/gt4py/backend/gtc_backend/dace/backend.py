@@ -61,7 +61,11 @@ class GTCDaCeExtGenerator:
     def to_device(self, sdfg: dace.SDFG):
         if self.backend.storage_info["device"] == "gpu":
             for array in sdfg.arrays.values():
-                array.storage = dace.StorageType.GPU_Global
+                array.storage = (
+                    dace.StorageType.GPU_Global
+                    if not array.transient
+                    else dace.StorageType.GPU_Global
+                )
             for node, _ in sdfg.all_nodes_recursive():
                 if isinstance(node, VerticalLoopLibraryNode):
                     node.implementation = "block"
@@ -172,13 +176,28 @@ class GTCDaCeExtGenerator:
                 dace.Memlet.simple(name, subset_str=subset_strs[name]),
             )
 
+        def replace_strides(arrays, get_layout_map):
+            symbol_mapping = {}
+            for array in arrays:
+                dims = array_dimensions(array)
+                ndata_dims = len(array.shape) - sum(dims)
+                layout = get_layout_map(dims + [True] * ndata_dims)
+                if array.transient:
+                    stride = 1
+                    for idx in reversed(np.argsort(layout)):
+                        symbol = array.strides[idx]
+                        size = array.shape[idx]
+                        symbol_mapping[str(symbol)] = stride
+                        stride *= size
+            return symbol_mapping
+
         symbol_mapping = {sym: sym for sym in inner_sdfg.symbols.keys()}
-        for array in inner_sdfg.arrays.values():
-            if array.transient:
-                stride = 1
-                for symbol, size in zip(reversed(array.strides), reversed(array.shape)):
-                    symbol_mapping[str(symbol)] = stride
-                    stride *= size
+        symbol_mapping.update(
+            **replace_strides(
+                [array for array in inner_sdfg.arrays.values() if array.transient],
+                self.backend.storage_info["layout_map"],
+            )
+        )
 
         for old, new in symbol_mapping.items():
             wrapper_sdfg.replace(old, new)
@@ -261,7 +280,7 @@ class DaCeComputationCodegen:
                 const int __J = domain[1];
                 const int __K = domain[2];
                 ${name}_t dace_handle;
-                auto allocator = gt::sid::make_cached_allocator(&std::make_unique<char[]>);
+                auto allocator = gt::sid::make_cached_allocator(&${allocator}<char[]>);
                 ${"\\n".join(tmp_allocs)}
                 __program_${name}(${",".join(["&dace_handle", *dace_args])});
             };
@@ -289,10 +308,16 @@ class DaCeComputationCodegen:
         for i, line in reversed(list(enumerate(lines))):
             if '#include "../../include/hash.h' in line:
                 lines = lines[0:i] + lines[i + 1 :]
-        if "CUDA" in {co.title for co in code_objects}:
+
+        is_gpu = "CUDA" in {co.title for co in code_objects}
+        if is_gpu:
             for i, line in enumerate(lines):
                 if line.strip() == f"struct {sdfg.name}_t {{":
-                    lines = lines[0:i] + lines[i + 3 :]
+                    j = i + 1
+                    while lines[j].strip() != "dace::cuda::Context *gpu_context;":
+                        j += 1
+
+                    lines = lines[0:i] + lines[j + 2 :]
                     break
 
             for i, line in enumerate(lines):
@@ -312,10 +337,12 @@ class DaCeComputationCodegen:
             dace_args=self.generate_dace_args(gtir, sdfg),
             functor_args=self.generate_functor_args(sdfg),
             tmp_allocs=self.generate_tmp_allocs(sdfg),
+            allocator="gt::cuda_util::cuda_malloc" if is_gpu else "std::make_unique",
         )
         generated_code = f"""#include <gridtools/sid/sid_shift_origin.hpp>
                              #include <gridtools/sid/allocator.hpp>
                              #include <gridtools/stencil/cartesian.hpp>
+                             {"#include <gridtools/common/cuda_util.hpp>" if is_gpu else ""}
                              namespace gt = gridtools;
                              {computations}
 

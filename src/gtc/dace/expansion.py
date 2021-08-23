@@ -577,10 +577,12 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
     def add_nodes_and_edges(self):
         in_memlets, out_memlets = self.get_innermost_memlets()
-        map_ranges = {
-            "i": get_interval_range_str(self.node.iteration_space.i_interval, "__I"),
-            "j": get_interval_range_str(self.node.iteration_space.j_interval, "__J"),
-        }
+        from collections import OrderedDict
+
+        map_ranges = OrderedDict(
+            j=get_interval_range_str(self.node.iteration_space.j_interval, "__J"),
+            i=get_interval_range_str(self.node.iteration_space.i_interval, "__I"),
+        )
         inputs = [name[len("IN_") :] for name in self.node.in_connectors]
         outputs = [name[len("OUT_") :] for name in self.node.out_connectors]
         input_nodes = {name: self.res_state.add_read(name) for name in inputs}
@@ -601,7 +603,7 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
 class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
 
-    default_tile_sizes = (4, 32)
+    default_tile_sizes = (64, 8)
 
     def get_tiled_subset_strs(self, nsdfg, iteration_space):
         iter_bounds = (iteration_space.i_interval.start, iteration_space.j_interval.start)
@@ -668,9 +670,11 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
         i_range = get_interval_range_str(iteration_space_bounding_box.i_interval, "__I")
         j_range = get_interval_range_str(iteration_space_bounding_box.j_interval, "__J")
         tile_sizes = self.node.tile_sizes or self.default_tile_sizes
-        ndrange = dict(
-            tile_i=f"{i_range}:{tile_sizes[0]}",
+        from collections import OrderedDict
+
+        ndrange = OrderedDict(
             tile_j=f"{j_range}:{tile_sizes[1]}",
+            tile_i=f"{i_range}:{tile_sizes[0]}",
         )
 
         map_entry, map_exit = self.res_state.add_map(
