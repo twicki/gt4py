@@ -227,7 +227,7 @@ class DefIRToGTIR(IRNodeVisitor):
     def visit_NativeFuncCall(self, node: NativeFuncCall, **kwargs: Any) -> gtir.NativeFuncCall:
         return gtir.NativeFuncCall(
             func=self.GT4PY_NATIVE_FUNC_TO_GTIR[node.func],
-            args=[self.visit(arg) for arg in node.args],
+            args=[self.visit(arg, **kwargs) for arg in node.args],
         )
 
     def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> gtir.FieldAccess:
