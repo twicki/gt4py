@@ -833,13 +833,17 @@ class HorizontalInterval(Node):
     @root_validator
     def check_start_before_end(cls, values: RootValidatorValuesType) -> RootValidatorValuesType:
         def get_offset(bound: Optional[AxisBound], level: LevelMarker) -> Tuple[LevelMarker, int]:
+            LARGE_NUM = 10000
             if not bound:
                 if level == LevelMarker.START:
                     return level, -np.iinfo(np.int32).max
                 else:
                     return level, np.iinfo(np.int32).max
             else:
-                return bound.level, bound.offset
+                bound_offset = bound.offset
+                if abs(bound_offset) == LARGE_NUM:
+                    bound_offset *= 10
+                return bound.level, bound_offset
 
         start_level, start_offset = get_offset(
             values["start"], cast(LevelMarker, LevelMarker.START)

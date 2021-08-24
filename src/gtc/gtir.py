@@ -172,6 +172,8 @@ class While(common.While[Stmt, Expr], Stmt):
         if field_writes.intersection(offset_reads):
             raise ValueError("Field written with read offsets in while loop")
         return body
+
+
 class HorizontalMask(common.HorizontalMask[Expr], Expr):
     pass
 

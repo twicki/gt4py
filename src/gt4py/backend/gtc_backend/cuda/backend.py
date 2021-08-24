@@ -58,7 +58,7 @@ class GTCCudaExtGenerator:
                 graph_merge_horizontal_executions,
                 OnTheFlyMerging,
                 KCacheDetection,
-                NoFieldAccessPruning
+                NoFieldAccessPruning,
             ]
         )
         cuir = oir_to_cuir.OIRToCUIR().visit(oir)
