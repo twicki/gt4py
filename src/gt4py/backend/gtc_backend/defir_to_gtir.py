@@ -292,16 +292,16 @@ class DefIRToGTIR(IRNodeVisitor):
             args=[self.visit(arg, **kwargs) for arg in node.args],
         )
 
-    def visit_FieldRef(self, node: FieldRef) -> gtir.FieldAccess:
+    def visit_FieldRef(self, node: FieldRef, **kwargs: Any) -> gtir.FieldAccess:
         data_index = [
             gtir.Literal(value=str(index), dtype=common.DataType.INT64)
             if isinstance(index, int)
-            else self.visit(index)
+            else self.visit(index, **kwargs)
             for index in node.data_index
         ]
         return gtir.FieldAccess(
             name=node.name,
-            offset=self._transform_offset(node.offset),
+            offset=self._transform_offset(node.offset, **kwargs),
             data_index=data_index,
             dtype=self._field_params[node.name].dtype if node.name in self._field_params else None,
         )
