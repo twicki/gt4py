@@ -34,6 +34,7 @@ from typing import Callable, Dict, Type, Union
 import dace
 import numpy as np
 
+import gt4py.backend
 from gt4py import definitions as gt_definitions
 from gt4py import utils as gt_utils
 from gt4py.lazy_stencil import LazyStencil
@@ -367,7 +368,8 @@ def lazy_stencil(
 
 def as_sdfg(*args, **kwargs) -> dace.SDFG:
     def _decorator(definition_func):
-        from gt4py.backend.gtc_backend.dace.backend import expand_and_wrap_sdfg
+
+        from gt4py.backend.gtc_backend.dace.backend import expand_and_wrap_sdfg, to_device
         from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
         from gt4py.definitions import BuildOptions
         from gt4py.frontend.gtscript_frontend import GTScriptFrontend
@@ -400,36 +402,11 @@ def as_sdfg(*args, **kwargs) -> dace.SDFG:
         )
 
         sdfg: dace.SDFG = OirSDFGBuilder().visit(oir)
-        sdfg = expand_and_wrap_sdfg(gt_ir, sdfg)
+        backend = gt4py.backend.from_name(kwargs.get("backend", "gtc:dace"))
+        to_device(sdfg, device=backend.storage_info["device"])
+        sdfg = expand_and_wrap_sdfg(gt_ir, sdfg, layout_map=backend.storage_info["layout_map"])
 
         return sdfg
-        # import dace.data
-        #
-        # for name, array in sdfg.arrays.items():
-        #     if isinstance(array, dace.data.Array) and array.transient:
-        #         array.lifetime = dace.AllocationLifetime.SDFG
-        #         dims = array_dimensions(array)
-        #         ndim = len(array.shape)
-        #         spatial_ndim = sum(dims)
-        #         data_ndim = len(array.shape) - spatial_ndim
-        #         strides = list(
-        #             reversed(
-        #                 list(
-        #                     itertools.accumulate(
-        #                         reversed(array.shape), func=operator.mul, initial=1
-        #                     )
-        #                 )
-        #             )
-        #         )[1:]
-        #         for i in range(data_ndim):
-        #             sdfg.replace(f"__{name}_d{i}_stride", strides[spatial_ndim + i])
-        #             sdfg.remove_symbol(f"__{name}_d{i}_stride")
-        #         filtered_dims = [v for i, v in enumerate("IJK") if dims[i]]
-        #         for i, var in reversed(list(enumerate(filtered_dims))):
-        #             sdfg.replace(f"__{name}_{var}_stride", strides[i])
-        #             sdfg.remove_symbol(f"__{name}_{var}_stride")
-        # sdfg.arg_names = [a.name for a in definition_ir.api_signature]
-        # return sdfg
 
     if not kwargs and len(args) == 1:
         return _decorator(args[0])
@@ -459,6 +436,7 @@ class SDFGWrapper:
 
         self.domain = domain
         self.origin = origin
+        self.backend = kwargs.get("backend", "gtc:dace")
         if "backend" in kwargs:
             del kwargs["backend"]
         self.stencil_kwargs = {
@@ -504,9 +482,9 @@ class SDFGWrapper:
             raise
 
         # otherwise, wrap and save sdfg from scratch
-        # inner_sdfg = self.stencil_object.sdfg
-        print("as_sdfg", self.func.__name__)
-        inner_sdfg = as_sdfg(**(self.stencil_kwargs.get("externals", {})))(self.func)
+        inner_sdfg = as_sdfg(backend=self.backend, **(self.stencil_kwargs.get("externals", {})))(
+            self.func
+        )
 
         self._sdfg = dace.SDFG("SDFGWrapper_" + inner_sdfg.name)
         state = self._sdfg.add_state("SDFGWrapper_" + inner_sdfg.name + "_state")

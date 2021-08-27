@@ -17,6 +17,7 @@
 from typing import Any, Dict, List, Set, Tuple
 
 import dace
+import dace.data
 import dace.library
 import dace.subsets
 
@@ -608,51 +609,54 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
     def get_tiled_subset_strs(self, nsdfg, iteration_space):
         iter_bounds = (iteration_space.i_interval.start, iteration_space.j_interval.start)
         tile_sizes = self.node.tile_sizes or self.default_tile_sizes
+        names = {*nsdfg.in_connectors, *nsdfg.out_connectors}
 
-        subset_strs = dict()
-        for name in {*nsdfg.in_connectors, *nsdfg.out_connectors}:
-            array = self.res_sdfg.arrays[name]
+        # collect inner subsets
+        inner_subsets: Dict[str, dace.subsets.Subset] = dict()
+        for state in nsdfg.sdfg.states():
+            for edge in state.edges():
+                if edge.data.data is not None:
+                    name = edge.data.data
+                    array: dace.data.Array = nsdfg.sdfg.arrays[name]
+                    dims = array_dimensions(array)
+
+                    ij_subset = dace.subsets.Range(edge.data.subset.ranges[: sum(dims[:2])])
+                    subset_union = inner_subsets.get(name, ij_subset)
+                    inner_subsets[name] = dace.subsets.union(subset_union, ij_subset)
+
+        # confine subset to tile
+        for name, subset in inner_subsets.items():
+
+            array: dace.data.Array = nsdfg.sdfg.arrays[name]
             dims = array_dimensions(array)
-            shape = [
-                dace.symbolic.pystr_to_symbolic(s)
-                .replace(
-                    dace.symbol("__I"),
-                    tile_sizes[0],
-                )
-                .replace(
-                    dace.symbol("__J"),
-                    tile_sizes[1],
-                )
-                for s in array.shape
-            ]
-            subsets = []
-
-            j_idx = 1 if dims[0] else 0
-            fmt = "{tile_var}+{offset}:min({tile_var}+{offset}+{tile_shape}, {all_shape})"
             if dims[0]:
-                subsets.append(
-                    fmt.format(
-                        tile_var="tile_i",
-                        offset=-iter_bounds[0].offset,
-                        tile_shape=shape[0],
-                        all_shape=array.shape[0],
-                    )
+                irange = list(subset.ranges[0])
+                irange[0] += dace.symbol("tile_i")
+                irange[1] = dace.symbolic.pystr_to_symbolic(irange[1]).replace(
+                    dace.symbol("__I"),
+                    dace.symbolic.pystr_to_symbolic(f"min({tile_sizes[0]},__I-tile_i)"),
                 )
+                subset.ranges[0] = tuple(irange)
             if dims[1]:
-                subsets.append(
-                    fmt.format(
-                        tile_var="tile_j",
-                        offset=-iter_bounds[1].offset,
-                        tile_shape=shape[j_idx],
-                        all_shape=array.shape[j_idx],
-                    )
+                j_idx = 1 if dims[0] else 0
+                jrange = list(subset.ranges[j_idx])
+                jrange[0] += dace.symbol("tile_j")
+                jrange[1] = dace.symbolic.pystr_to_symbolic(jrange[1]).replace(
+                    dace.symbol("__J"),
+                    dace.symbolic.pystr_to_symbolic(f"min({tile_sizes[1]},__J-tile_j)"),
                 )
-            subsets.extend(f"0:{s}" for s in shape[sum(dims[0:2]) :])
-            subset_strs[name] = ",".join(subsets)
-        return subset_strs
+                subset.ranges[1] = tuple(jrange)
+        for name, subset in inner_subsets.items():
+
+            array: dace.data.Array = nsdfg.sdfg.arrays[name]
+            dims = array_dimensions(array)
+            ndims = len(array.shape) - sum(dims[:2])
+            inner_subsets[name] = dace.subsets.Range(
+                subset.ranges + [(0, None, 1) for d in range(ndims)]
+            )
+        return {k: str(v) for k, v in inner_subsets.items()}
 
     def device_map(self, nsdfg):
-
         self.res_state.add_node(nsdfg)
         self.res_state.add_nested_sdfg
 
@@ -665,7 +669,7 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
             for node, _ in section.all_nodes_recursive():
                 if isinstance(node, HorizontalExecutionLibraryNode):
                     iteration_space_bounding_box = (
-                        iteration_space_bounding_box | node.iteration_space
+                        iteration_space_bounding_box & node.iteration_space
                     )
         i_range = get_interval_range_str(iteration_space_bounding_box.i_interval, "__I")
         j_range = get_interval_range_str(iteration_space_bounding_box.j_interval, "__J")

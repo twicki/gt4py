@@ -41,15 +41,160 @@ from gtc import gtir, gtir_to_oir
 from gtc.common import LevelMarker
 from gtc.dace.nodes import HorizontalExecutionLibraryNode, VerticalLoopLibraryNode
 from gtc.dace.oir_to_dace import OirSDFGBuilder
-from gtc.dace.utils import array_dimensions
+from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 from gtc.passes.oir_pipeline import OirPipeline
 
 
 if TYPE_CHECKING:
     from gt4py.stencil_object import StencilObject
+
+
+def post_expand_trafos(sdfg: dace.SDFG):
+    state = sdfg.node(0)
+    sdict = state.scope_children()
+    for mapnode in sdict[None]:
+        if not isinstance(mapnode, dace.nodes.MapEntry):
+            continue
+        inner_maps = [n for n in sdict[mapnode] if isinstance(n, dace.nodes.MapEntry)]
+        if len(inner_maps) != 1:
+            continue
+        inner_map = inner_maps[0]
+        if "k" in inner_map.params:
+            res_entry, _ = MapCollapse.apply_to(
+                sdfg, _outer_map_entry=mapnode, _inner_map_entry=inner_map, save=False
+            )
+            res_entry.schedule = mapnode.schedule
+
+
+def to_device(sdfg: dace.SDFG, device):
+    if device == "gpu":
+        for array in sdfg.arrays.values():
+            array.storage = (
+                dace.StorageType.GPU_Global if not array.transient else dace.StorageType.GPU_Global
+            )
+        for node, _ in sdfg.all_nodes_recursive():
+            if isinstance(node, VerticalLoopLibraryNode):
+                node.implementation = "block"
+                node.default_storage_type = dace.StorageType.GPU_Global
+                node.map_schedule = dace.ScheduleType.Sequential
+                node.tiling_map_schedule = dace.ScheduleType.GPU_Device
+                for _, section in node.sections:
+                    for array in section.arrays.values():
+                        array.storage = dace.StorageType.GPU_Global
+                    for node, _ in section.all_nodes_recursive():
+                        if isinstance(node, HorizontalExecutionLibraryNode):
+                            node.map_schedule = dace.ScheduleType.GPU_ThreadBlock
+
+
+def expand_and_wrap_sdfg(
+    gtir: gtir.Stencil, inner_sdfg: dace.SDFG, layout_map
+) -> dace.SDFG:  # noqa: C901
+    wrapper_sdfg = dace.SDFG(gtir.name)
+    wrapper_state = wrapper_sdfg.add_state(gtir.name)
+
+    args_data = make_args_data_from_gtir(GtirPipeline(gtir))
+
+    # stencils without effect
+    if all(info is None for info in args_data.field_info.values()):
+        return wrapper_sdfg
+
+    for array in inner_sdfg.arrays.values():
+        if array.transient:
+            array.lifetime = dace.AllocationLifetime.Persistent
+    inner_sdfg.expand_library_nodes(recursive=True)
+    # inner_sdfg.apply_strict_transformations()
+
+    post_expand_trafos(inner_sdfg)
+
+    extents = compute_legacy_extents(gtir, allow_negative=True)
+
+    inputs = {
+        name
+        for name, info in args_data.field_info.items()
+        if info is not None and info.access != gt4py.definitions.AccessKind.WRITE
+    }
+    outputs = {
+        name
+        for name, info in args_data.field_info.items()
+        if info is not None and info.access != gt4py.definitions.AccessKind.READ
+    }
+
+    nsdfg = wrapper_state.add_nested_sdfg(inner_sdfg, None, inputs=inputs, outputs=outputs)
+
+    subset_strs = {}
+
+    for name, info in args_data.field_info.items():
+        if info is None:
+            continue
+        extent = [e for e, a in zip(extents[name], "IJK") if a in args_data.field_info[name].axes]
+        shape = [
+            s + abs(max(el, 0)) for s, (el, eh) in zip(inner_sdfg.arrays[name].shape, extent)
+        ] + [str(d) for d in args_data.field_info[name].data_dims]
+        wrapper_sdfg.add_array(
+            name,
+            strides=inner_sdfg.arrays[name].strides,
+            shape=shape,
+            dtype=inner_sdfg.arrays[name].dtype,
+            storage=inner_sdfg.arrays[name].storage,
+        )
+
+        subset_strs[name] = ",".join(
+            [
+                f"{max(e[0], 0)}:{max(e[0], 0) + s}"
+                for e, s in zip(extent, inner_sdfg.arrays[name].shape)
+            ]
+            + [f"0:{d}" for d in args_data.field_info[name].data_dims]
+        )
+    for name in inputs:
+        wrapper_state.add_edge(
+            wrapper_state.add_read(name),
+            None,
+            nsdfg,
+            name,
+            dace.Memlet.simple(name, subset_str=subset_strs[name]),
+        )
+    for name in outputs:
+        wrapper_state.add_edge(
+            nsdfg,
+            name,
+            wrapper_state.add_write(name),
+            None,
+            dace.Memlet.simple(name, subset_str=subset_strs[name]),
+        )
+    symbol_mapping = {sym: sym for sym in inner_sdfg.symbols.keys()}
+    symbol_mapping.update(
+        **replace_strides(
+            [array for array in inner_sdfg.arrays.values() if array.transient],
+            layout_map,
+        )
+    )
+
+    for old, new in symbol_mapping.items():
+        wrapper_sdfg.replace(old, new)
+
+    for name, info in args_data.parameter_info.items():
+        if info is not None and name not in wrapper_sdfg.symbols:
+            wrapper_sdfg.add_symbol(name, nsdfg.sdfg.symbols[name])
+
+    from dace.transformation.interstate import InlineTransients
+
+    for state in wrapper_sdfg.states():
+        for nsdfg in state.nodes():
+            if not isinstance(nsdfg, dace.nodes.NestedSDFG):
+                continue
+            from dace.transformation.interstate import InlineSDFG
+
+            InlineSDFG.apply_to(wrapper_sdfg, _nested_sdfg=nsdfg, save=False)
+
+    wrapper_sdfg.apply_transformations_repeated(
+        [*strict_transformations(), MapCollapse, InlineTransients], strict=True
+    )
+    wrapper_sdfg.validate()
+    return wrapper_sdfg
 
 
 class GTCDaCeExtGenerator:
@@ -58,168 +203,16 @@ class GTCDaCeExtGenerator:
         self.module_name = module_name
         self.backend = backend
 
-    def to_device(self, sdfg: dace.SDFG):
-        if self.backend.storage_info["device"] == "gpu":
-            for array in sdfg.arrays.values():
-                array.storage = (
-                    dace.StorageType.GPU_Global
-                    if not array.transient
-                    else dace.StorageType.GPU_Global
-                )
-            for node, _ in sdfg.all_nodes_recursive():
-                if isinstance(node, VerticalLoopLibraryNode):
-                    node.implementation = "block"
-                    node.default_storage_type = dace.StorageType.GPU_Global
-                    node.map_schedule = dace.ScheduleType.Sequential
-                    node.tiling_map_schedule = dace.ScheduleType.GPU_Device
-                    for _, section in node.sections:
-                        for array in section.arrays.values():
-                            array.storage = dace.StorageType.GPU_Global
-                        for node, _ in section.all_nodes_recursive():
-                            if isinstance(node, HorizontalExecutionLibraryNode):
-                                node.map_schedule = dace.ScheduleType.GPU_ThreadBlock
-        else:
-            for node, _ in sdfg.all_nodes_recursive():
-                if isinstance(node, VerticalLoopLibraryNode):
-                    node.implementation = "naive"
-                    node.ijcache_storage_type = dace.StorageType.CPU_ThreadLocal
-
-    def post_expand_trafos(self, sdfg: dace.SDFG):
-        state = sdfg.node(0)
-        sdict = state.scope_children()
-        for mapnode in sdict[None]:
-            if not isinstance(mapnode, dace.nodes.MapEntry):
-                continue
-            inner_maps = [n for n in sdict[mapnode] if isinstance(n, dace.nodes.MapEntry)]
-            if len(inner_maps) != 1:
-                continue
-            inner_map = inner_maps[0]
-            if "k" in inner_map.params:
-                res_entry, _ = MapCollapse.apply_to(
-                    sdfg, _outer_map_entry=mapnode, _inner_map_entry=inner_map, save=False
-                )
-                res_entry.schedule = dace.ScheduleType.GPU_Device
-
-    def expand_and_wrap_sdfg(
-        self, gtir: gtir.Stencil, inner_sdfg: dace.SDFG
-    ) -> dace.SDFG:  # noqa: C901
-        wrapper_sdfg = dace.SDFG(gtir.name)
-        wrapper_state = wrapper_sdfg.add_state(gtir.name)
-
-        args_data = make_args_data_from_gtir(GtirPipeline(gtir))
-
-        # stencils without effect
-        if all(info is None for info in args_data.field_info.values()):
-            return wrapper_sdfg
-
-        inner_sdfg.expand_library_nodes(recursive=True)
-        inner_sdfg.apply_strict_transformations()
-
-        self.post_expand_trafos(inner_sdfg)
-
-        extents = compute_legacy_extents(gtir, allow_negative=True)
-
-        inputs = {
-            name
-            for name, info in args_data.field_info.items()
-            if info is not None and info.access != gt4py.definitions.AccessKind.WRITE
-        }
-        outputs = {
-            name
-            for name, info in args_data.field_info.items()
-            if info is not None and info.access != gt4py.definitions.AccessKind.READ
-        }
-
-        nsdfg = wrapper_state.add_nested_sdfg(inner_sdfg, None, inputs=inputs, outputs=outputs)
-
-        subset_strs = {}
-
-        for name, info in args_data.field_info.items():
-            if info is None:
-                continue
-
-            extent = [
-                e for e, a in zip(extents[name], "IJK") if a in args_data.field_info[name].axes
-            ]
-            shape = [
-                s + abs(max(el, 0)) for s, (el, eh) in zip(inner_sdfg.arrays[name].shape, extent)
-            ] + [str(d) for d in args_data.field_info[name].data_dims]
-            wrapper_sdfg.add_array(
-                name,
-                strides=inner_sdfg.arrays[name].strides,
-                shape=shape,
-                dtype=inner_sdfg.arrays[name].dtype,
-                storage=inner_sdfg.arrays[name].storage,
-            )
-
-            subset_strs[name] = ",".join(
-                [
-                    f"{max(e[0], 0)}:{max(e[0], 0) + s}"
-                    for e, s in zip(extent, inner_sdfg.arrays[name].shape)
-                ]
-                + [f"0:{d}" for d in args_data.field_info[name].data_dims]
-            )
-        for name in inputs:
-            wrapper_state.add_edge(
-                wrapper_state.add_read(name),
-                None,
-                nsdfg,
-                name,
-                dace.Memlet.simple(name, subset_str=subset_strs[name]),
-            )
-        for name in outputs:
-            wrapper_state.add_edge(
-                nsdfg,
-                name,
-                wrapper_state.add_write(name),
-                None,
-                dace.Memlet.simple(name, subset_str=subset_strs[name]),
-            )
-
-        def replace_strides(arrays, get_layout_map):
-            symbol_mapping = {}
-            for array in arrays:
-                dims = array_dimensions(array)
-                ndata_dims = len(array.shape) - sum(dims)
-                layout = get_layout_map(dims + [True] * ndata_dims)
-                if array.transient:
-                    stride = 1
-                    for idx in reversed(np.argsort(layout)):
-                        symbol = array.strides[idx]
-                        size = array.shape[idx]
-                        symbol_mapping[str(symbol)] = stride
-                        stride *= size
-            return symbol_mapping
-
-        symbol_mapping = {sym: sym for sym in inner_sdfg.symbols.keys()}
-        symbol_mapping.update(
-            **replace_strides(
-                [array for array in inner_sdfg.arrays.values() if array.transient],
-                self.backend.storage_info["layout_map"],
-            )
-        )
-
-        for old, new in symbol_mapping.items():
-            wrapper_sdfg.replace(old, new)
-
-        for name, info in args_data.parameter_info.items():
-            if info is not None and name not in wrapper_sdfg.symbols:
-                wrapper_sdfg.add_symbol(name, nsdfg.sdfg.symbols[name])
-
-        wrapper_sdfg.apply_transformations_repeated(
-            [*strict_transformations(), MapCollapse], strict=True
-        )
-        wrapper_sdfg.validate()
-        return wrapper_sdfg
-
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
-        oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(skip=[FillFlushToLocalKCaches])
+        oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
+            skip=[OnTheFlyMerging, FillFlushToLocalKCaches]
+        )
         sdfg = OirSDFGBuilder().visit(oir)
 
-        self.to_device(sdfg)
+        to_device(sdfg, self.backend.storage_info["device"])
 
-        sdfg = self.expand_and_wrap_sdfg(gtir, sdfg)
+        sdfg = expand_and_wrap_sdfg(gtir, sdfg, self.backend.storage_info["layout_map"])
 
         for tmp_sdfg in sdfg.all_sdfgs_recursive():
             tmp_sdfg.transformation_hist = []
@@ -231,8 +224,6 @@ class GTCDaCeExtGenerator:
             )
         )
 
-        sdfg.apply_strict_transformations(validate=False)
-        sdfg.save(f"{sdfg.name}.sdfg")
         with dace.config.set_temporary("compiler", "cuda", "max_concurrent_streams", value=-1):
             implementation = DaCeComputationCodegen.apply(gtir, sdfg)
 
@@ -302,7 +293,7 @@ class DaCeComputationCodegen:
     def apply(cls, gtir, sdfg: dace.SDFG):
         self = cls()
 
-        code_objects = dace.SDFG.from_json(sdfg.to_json()).generate_code()
+        code_objects = sdfg.generate_code()
         computations = code_objects[[co.title for co in code_objects].index("Frame")].clean_code
         lines = computations.split("\n")
         for i, line in reversed(list(enumerate(lines))):

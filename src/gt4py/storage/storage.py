@@ -277,7 +277,13 @@ class GPUStorage(Storage):
         return list(cls._modified_storages.values())
 
     @property
+    def __array_interface__(self):
+        self.device_to_host()
+        return super().__array_interface__
+
+    @property
     def __cuda_array_interface__(self):
+        self.host_to_device()
         array_interface = self.__array_interface__
         array_interface["version"] = 2
         array_interface["strides"] = self.strides
