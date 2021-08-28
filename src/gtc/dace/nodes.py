@@ -47,7 +47,7 @@ class OIRLibraryNode(ABC, dace.nodes.LibraryNode):
     def to_json(self, parent):
         protocol = pickle.DEFAULT_PROTOCOL
         bytes = pickle.dumps(self, protocol=protocol)
-        return dict(type=type(self).__name__, pickle=base64.b64encode(bytes), protocol=protocol)
+        return dict(type=type(self).__name__, pickle=base64.b64encode(bytes).decode('ascii'), protocol=protocol)
 
     @classmethod
     def from_json(cls, json_obj, context=None):
