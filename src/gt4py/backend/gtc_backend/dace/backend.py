@@ -45,7 +45,6 @@ from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
-from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 from gtc.passes.oir_pipeline import OirPipeline
 
 
@@ -206,7 +205,7 @@ class GTCDaCeExtGenerator:
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
-            skip=[OnTheFlyMerging, FillFlushToLocalKCaches]
+            skip=[FillFlushToLocalKCaches]
         )
         sdfg = OirSDFGBuilder().visit(oir)
 
