@@ -32,7 +32,8 @@ from gtc.dace.utils import (
     get_node_name_mapping,
 )
 from gtc.oir import CacheDesc, HorizontalExecution, Interval, VerticalLoop, VerticalLoopSection
-
+import pickle
+import base64
 
 class OIRLibraryNode(ABC, dace.nodes.LibraryNode):
     @abstractmethod
@@ -43,6 +44,16 @@ class OIRLibraryNode(ABC, dace.nodes.LibraryNode):
     def __eq__(self, other):
         raise NotImplementedError("Implement in child class.")
 
+    def to_json(self, parent):
+        protocol = pickle.DEFAULT_PROTOCOL
+        bytes = pickle.dumps(self, protocol=protocol)
+        return dict(type=type(self).__name__, pickle=base64.b64encode(bytes), protocol=protocol)
+
+    @classmethod
+    def from_json(cls, json_obj, context=None):
+        b64string = json_obj['pickle']
+        bytes = base64.b64decode(b64string)
+        return pickle.loads(bytes)
 
 @library.node
 class VerticalLoopLibraryNode(OIRLibraryNode):
