@@ -1043,6 +1043,11 @@ class IRMaker(ast.NodeVisitor):
         index = self.visit(node.value)
         return index
 
+    def _parse_vertical_index(self, node: ast.Call) -> gt_ir.AxisIndex:
+        if node.args[0].id != "K":
+            raise GTScriptSyntaxError("Only K is supported")
+        return gt_ir.AxisIndex(axis="K")
+
     def _parse_forloop_args_call(self, node: ast.Call) -> list:
         assert isinstance(node, ast.Call)
         assert isinstance(node.func, ast.Name) and node.func.id == "range"

@@ -1378,7 +1378,6 @@ class TestForLoopSyntax:
         assert for_node.stop.rhs == gt_ir.ScalarLiteral(value=1, data_type=gt_ir.DataType.INT64)
         assert for_node.step == 1
 
-    @pytest.mark.skip(reason="AttributeError: 'IRMaker' object has no attribute '_parse_vertical_index'")
     def test_K_stop_only_index(self):
         def func(field: gtscript.Field[int]):
             with computation(FORWARD), interval(...):
@@ -1415,7 +1414,6 @@ class TestForLoopSyntax:
         assert for_node.stop.rhs == gt_ir.ScalarLiteral(value=1, data_type=gt_ir.DataType.INT64)
         assert for_node.step == 1
 
-    @pytest.mark.skip(reason="AttributeError: 'IRMaker' object has no attribute '_parse_vertical_index'")
     def test_K_start_stop_nostep(self):
         def func(field: gtscript.Field[int]):
             with computation(FORWARD), interval(...):
