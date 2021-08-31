@@ -31,12 +31,12 @@ def _overlap_along_axis(
     """Return a tuple of the distances to the edge of the compute domain, if overlapping."""
     LARGE_NUM = 10000
 
-    if interval.start.level == common.LevelMarker.START:
+    if interval.start and interval.start.level == common.LevelMarker.START:
         start_diff = extent[0] - interval.start.offset
     else:
         start_diff = None
 
-    if interval.end.level == common.LevelMarker.END:
+    if interval.end and interval.end.level == common.LevelMarker.END:
         end_diff = extent[1] - interval.end.offset
     else:
         end_diff = None
