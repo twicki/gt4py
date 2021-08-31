@@ -38,15 +38,21 @@ class LegacyExtentsVisitor(NodeVisitor):
 
     def visit_Stencil(self, node: gtir.Stencil, **kwargs: Any) -> Dict[str, common.IJExtent]:
         field_extents = {name: common.IJExtent.zero() for name in _iter_field_names(node)}
+        visited_assigns = {}
         ctx = self.StencilContext()
+        for horizontal_region in node.iter_tree().if_isinstance(gtir.HorizontalRegion):
+            self.visit(
+                horizontal_region, ctx=ctx, field_extents=field_extents, visited_assigns=visited_assigns
+            )
         for field_if in node.iter_tree().if_isinstance(gtir.FieldIfStmt):
-            self.visit(field_if, ctx=ctx)
+            self.visit(field_if, ctx=ctx, field_extents=field_extents, visited_assigns=visited_assigns)
         for assign in reversed(_iter_assigns(node).to_list()):
-            self.visit(assign, ctx=ctx, field_extents=field_extents)
+            self.visit(assign, ctx=ctx, field_extents=field_extents, visited_assigns=visited_assigns)
         return field_extents
 
     def visit_HorizontalRegion(self, node: gtir.HorizontalRegion, **kwargs: Any) -> None:
-        self.visit(node.body, horizontal_mask=node.mask, **kwargs)
+        for assign in reversed(_iter_assigns(node).to_list()):
+            self.visit(assign, horizontal_mask=node.mask, **kwargs)
 
     def visit_ParAssignStmt(
         self,
@@ -55,25 +61,28 @@ class LegacyExtentsVisitor(NodeVisitor):
         ctx: StencilContext,
         field_extents: Dict[str, common.IJExtent],
         horizontal_mask: Optional[common.HorizontalMask] = None,
+        visited_assigns: Dict[int, gtir.ParAssignStmt],
         **kwargs: Any,
     ) -> None:
-        left_extent = field_extents.setdefault(node.left.name, common.IJExtent.zero())
-        if horizontal_mask:
-            dist_from_edge = utils.compute_extent_difference(left_extent, horizontal_mask)
-            if dist_from_edge is None:
-                return
-        else:
-            dist_from_edge = common.IJExtent.zero()
-        pa_ctx = self.AssignContext(left_extent=left_extent - dist_from_edge)
-        self.visit(
-            ctx.assign_conditions.get(id(node), []),
-            field_extents=field_extents,
-            pa_ctx=pa_ctx,
-            **kwargs,
-        )
-        self.visit(node.right, field_extents=field_extents, pa_ctx=pa_ctx, **kwargs)
-        for key, value in pa_ctx.assign_extents.items():
-            field_extents[key] |= value
+        if id(self) not in visited_assigns:
+            left_extent = field_extents.setdefault(node.left.name, common.IJExtent.zero())
+            if horizontal_mask:
+                dist_from_edge = utils.compute_extent_difference(left_extent, horizontal_mask)
+                if dist_from_edge is None:
+                    return
+            else:
+                dist_from_edge = common.IJExtent.zero()
+            pa_ctx = self.AssignContext(left_extent=left_extent - dist_from_edge)
+            self.visit(
+                ctx.assign_conditions.get(id(node), []),
+                field_extents=field_extents,
+                pa_ctx=pa_ctx,
+                **kwargs,
+            )
+            self.visit(node.right, field_extents=field_extents, pa_ctx=pa_ctx, **kwargs)
+            for key, value in pa_ctx.assign_extents.items():
+                field_extents[key] |= value
+            visited_assigns[id(self)] = self
 
     def visit_FieldIfStmt(
         self, node: gtir.FieldIfStmt, *, ctx: StencilContext, **kwargs: Any
