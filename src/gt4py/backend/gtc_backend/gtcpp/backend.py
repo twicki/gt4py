@@ -41,7 +41,6 @@ from gtc.passes.oir_dace_optimizations.horizontal_execution_merging import (
     graph_merge_horizontal_executions,
 )
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches, KCacheDetection
-from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 from gtc.passes.oir_pipeline import OirPipeline
 
 
@@ -60,7 +59,6 @@ class GTCGTExtGenerator:
         oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
             skip=[
                 graph_merge_horizontal_executions,
-                OnTheFlyMerging,
                 KCacheDetection,
                 FillFlushToLocalKCaches,
             ]
