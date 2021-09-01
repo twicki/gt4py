@@ -439,6 +439,7 @@ class SDFGWrapper:
         self.backend = kwargs.get("backend", "gtc:dace")
         if "backend" in kwargs:
             del kwargs["backend"]
+        self.device = gt4py.backend.from_name(self.backend).storage_info["device"]
         self.stencil_kwargs = {
             **kwargs,
             **dict(
@@ -461,7 +462,9 @@ class SDFGWrapper:
             )
 
             basename = os.path.splitext(self.stencil_object._file_name)[0]
-            self.filename = basename + "_wrapper_" + str(shash(self.origin, self.domain)) + ".sdfg"
+            self.filename = (
+                basename + "_wrapper_" + str(shash(self.device, self.origin, self.domain)) + ".sdfg"
+            )
 
         # check if same sdfg already cached in memory
         if self._sdfg is not None:
@@ -512,7 +515,15 @@ class SDFGWrapper:
                     str(d) for d in self.stencil_object.field_info[name].data_dims
                 ]
 
-                self._sdfg.add_array(name, dtype=array.dtype, strides=array.strides, shape=shape)
+                self._sdfg.add_array(
+                    name,
+                    dtype=array.dtype,
+                    strides=array.strides,
+                    shape=shape,
+                    storage=dace.StorageType.GPU_Global
+                    if self.device == "gpu"
+                    else dace.StorageType.Default,
+                )
                 if isinstance(self.origin, tuple):
                     origin = [o for a, o in zip("IJK", self.origin) if a in axes]
                 else:

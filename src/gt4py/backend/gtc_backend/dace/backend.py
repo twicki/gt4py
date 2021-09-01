@@ -53,6 +53,8 @@ if TYPE_CHECKING:
 
 
 def post_expand_trafos(sdfg: dace.SDFG):
+
+    sdfg.apply_strict_transformations()
     state = sdfg.node(0)
     sdict = state.scope_children()
     for mapnode in sdict[None]:
@@ -106,7 +108,6 @@ def expand_and_wrap_sdfg(
             array.lifetime = dace.AllocationLifetime.Persistent
     inner_sdfg = dace.SDFG.from_json(inner_sdfg.to_json())
     inner_sdfg.expand_library_nodes(recursive=True)
-    # inner_sdfg.apply_strict_transformations()
 
     post_expand_trafos(inner_sdfg)
 
