@@ -1185,9 +1185,7 @@ class IRMaker(ast.NodeVisitor):
                         )
                     result.offset = {axis: value for axis, value in zip(field_axes, index)}
             elif isinstance(node.value, ast.Subscript):
-                result.data_index = [
-                    gt_ir.ScalarLiteral(value=i, data_type=gt_ir.DataType.INT64) for i in index
-                ]
+                result.data_index = index
             else:
                 raise GTScriptSyntaxError(
                     "Unrecognized subscript expression", loc=gt_ir.Location.from_ast_node(node)
