@@ -236,7 +236,7 @@ class TestExecInfo:
         assert type(self.diffusion).__name__ not in exec_info
 
     @given(data=hyp_st.data())
-    @pytest.mark.parametrize("backend", backend_list)
+    @pytest.mark.parametrize("backend", backend_nonumpy)
     def test_aggregate(self, data, backend):
         # set backend as instance attribute
         self.backend = backend
