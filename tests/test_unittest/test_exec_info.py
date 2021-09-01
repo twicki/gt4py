@@ -30,7 +30,6 @@ from ..definitions import INTERNAL_BACKENDS
 
 
 backend_list = [backend for backend in INTERNAL_BACKENDS if backend.values[0] != "debug"]
-backend_nonumpy = [backend for backend in backend_list if backend.values[0] != "gtc:numpy"]
 
 
 class TestExecInfo:
@@ -193,7 +192,7 @@ class TestExecInfo:
                 assert stencil_info["total_run_cpp_time"] > stencil_info["run_cpp_time"]
 
     @given(data=hyp_st.data())
-    @pytest.mark.parametrize("backend", backend_nonumpy)
+    @pytest.mark.parametrize("backend", backend_list)
     def test_backcompatibility(self, data, backend):
         # set backend as instance attribute
         self.backend = backend
@@ -236,7 +235,7 @@ class TestExecInfo:
         assert type(self.diffusion).__name__ not in exec_info
 
     @given(data=hyp_st.data())
-    @pytest.mark.parametrize("backend", backend_nonumpy)
+    @pytest.mark.parametrize("backend", backend_list)
     def test_aggregate(self, data, backend):
         # set backend as instance attribute
         self.backend = backend
