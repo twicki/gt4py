@@ -488,7 +488,6 @@ class SDFGWrapper:
         inner_sdfg = as_sdfg(backend=self.backend, **(self.stencil_kwargs.get("externals", {})))(
             self.func
         )
-
         self._sdfg = dace.SDFG("SDFGWrapper_" + inner_sdfg.name)
         state = self._sdfg.add_state("SDFGWrapper_" + inner_sdfg.name + "_state")
 
@@ -561,11 +560,44 @@ class SDFGWrapper:
         for symbol in nsdfg.sdfg.free_symbols:
             if symbol not in self._sdfg.symbols:
                 self._sdfg.add_symbol(symbol, nsdfg.sdfg.symbols[symbol])
+
+        ival, jval, kval = self.domain[0], self.domain[1], self.domain[2]
         for sdfg in self._sdfg.all_sdfgs_recursive():
-            sdfg.replace("__I", str(self.domain[0]))
-            sdfg.replace("__J", str(self.domain[1]))
-            sdfg.replace("__K", str(self.domain[2]))
-            sdfg.specialize({"__I": self.domain[0], "__J": self.domain[1], "__K": self.domain[2]})
+            if sdfg.parent_nsdfg_node is not None:
+                symmap = sdfg.parent_nsdfg_node.symbol_mapping
+
+                if '__I' in symmap:
+                    ival = symmap['__I']
+                    del symmap['__I']
+                if '__J' in symmap:
+                    jval = symmap['__J']
+                    del symmap['__J']
+                if '__K' in symmap:
+                    kval = symmap['__K']
+                    del symmap['__K']
+
+            sdfg.replace('__I', ival)
+            if '__I' in sdfg.symbols:
+                sdfg.remove_symbol('__I')
+            sdfg.replace('__J', jval)
+            if '__J' in sdfg.symbols:
+                sdfg.remove_symbol('__J')
+            sdfg.replace('__K', kval)
+            if '__K' in sdfg.symbols:
+                sdfg.remove_symbol('__K')
+
+            for val in ival, jval, kval:
+                sym = dace.symbolic.pystr_to_symbolic(val)
+                for fsym in sym.free_symbols:
+                    if sdfg.parent_nsdfg_node is not None:
+                        sdfg.parent_nsdfg_node.symbol_mapping[str(fsym)] = fsym
+                    if fsym not in sdfg.symbols:
+                        if fsym in sdfg.parent_sdfg.symbols:
+                            sdfg.add_symbol(str(fsym), stype=sdfg.parent_sdfg.symbols[str(fsym)])
+                        else:
+                            sdfg.add_symbol(str(fsym), stype=dace.dtypes.int32)
+
+            # sdfg.specialize({"__I": self.domain[0], "__J": self.domain[1], "__K": self.domain[2]})
         for _, name, array in self._sdfg.arrays_recursive():
             if array.transient:
                 array.lifetime = dace.dtypes.AllocationLifetime.SDFG
@@ -604,6 +636,7 @@ class SDFGWrapper:
         self._sdfg.save(self.filename)
         SDFGWrapper.loaded_compiled_sdfgs[self.filename] = self._sdfg
         print("saved (__sdfg__):", self.filename)
+        self._sdfg.validate()
         return dace.SDFG.from_json(self._sdfg.to_json())
 
     def __sdfg_signature__(self):
