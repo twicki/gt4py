@@ -561,6 +561,11 @@ class SDFGWrapper:
             if symbol not in self._sdfg.symbols:
                 self._sdfg.add_symbol(symbol, nsdfg.sdfg.symbols[symbol])
 
+        if any(d == 0 for d in self.domain):
+            states = self._sdfg.states()
+            assert len(states) == 1
+            for node in states[0].nodes():
+                state.remove_node(node)
         ival, jval, kval = self.domain[0], self.domain[1], self.domain[2]
         for sdfg in self._sdfg.all_sdfgs_recursive():
             if sdfg.parent_nsdfg_node is not None:
@@ -597,7 +602,6 @@ class SDFGWrapper:
                         else:
                             sdfg.add_symbol(str(fsym), stype=dace.dtypes.int32)
 
-            # sdfg.specialize({"__I": self.domain[0], "__J": self.domain[1], "__K": self.domain[2]})
         for _, name, array in self._sdfg.arrays_recursive():
             if array.transient:
                 array.lifetime = dace.dtypes.AllocationLifetime.SDFG
