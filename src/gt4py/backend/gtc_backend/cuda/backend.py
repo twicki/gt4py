@@ -53,7 +53,8 @@ class GTCCudaExtGenerator:
         cuir = kernel_fusion.FuseKernels().visit(cuir)
         cuir = extent_analysis.ComputeExtents().visit(cuir)
         cuir = extent_analysis.CacheExtents().visit(cuir)
-        implementation = cuir_codegen.CUIRCodegen.apply(cuir)
+        block_size = self.backend.builder.options.backend_opts.get("block_size", None)
+        implementation = cuir_codegen.CUIRCodegen.apply(cuir, block_size=block_size)
         bindings = GTCCudaBindingsCodegen.apply(
             cuir, module_name=self.module_name, backend=self.backend
         )
@@ -127,7 +128,11 @@ class GTCCudaBackend(BaseGTBackend, CLIBackendMixin):
     """CUDA backend using gtc."""
 
     name = "gtc:cuda"
-    options = {**BaseGTBackend.GT_BACKEND_OPTS, "device_sync": {"versioning": True, "type": bool}}
+    options = {
+        **BaseGTBackend.GT_BACKEND_OPTS,
+        "device_sync": {"versioning": True, "type": bool},
+        "block_size": {"versioning": True, "type": Tuple[int, int]},
+    }
     languages = {"computation": "cuda", "bindings": ["python"]}
     storage_info = {
         "alignment": 32,
