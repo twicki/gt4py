@@ -254,14 +254,18 @@ class CUIRCodegen(codegen.TemplatedGenerator):
     def visit_VerticalLoop(
         self, node: cuir.VerticalLoop, *, symtable: Dict[str, Any], **kwargs: Any
     ) -> Union[str, Collection[str]]:
-
-        return self.generic_visit(
-            node,
-            fields=node.iter_tree()
+        fields = (
+            node.iter_tree()
             .if_isinstance(cuir.FieldAccess)
             .getattr("name", "data_index")
             .map(lambda x: (x[0], len(x[1])))
-            .to_set(),
+            .to_set()
+        )
+        if node.has_horizontal_masks:
+            fields.update([(f"{index}_pos", 0) for index in "ij"])
+        return self.generic_visit(
+            node,
+            fields=fields,
             k_cache_decls=node.k_caches,
             order=node.loop_order,
             symtable=symtable,
@@ -274,9 +278,9 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         struct loop_${id(_this_node)}_f {
             sid::ptr_holder_type<Sid> m_ptr_holder;
             sid::strides_type<Sid> m_strides;
-            int i_size;
-            int j_size;
-            int k_size;
+            const int i_size;
+            const int j_size;
+            const int k_size;
 
             template <class Validator>
             GT_FUNCTION_DEVICE void operator()(const int _i_block,
@@ -295,8 +299,6 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                 sid::shift(_ptr,
                            sid::get_stride<dim::j>(m_strides),
                            _j_block);
-                const int i_pos = blockDim.x * blockIdx.x + threadIdx.x;
-                const int j_pos = blockDim.y * blockIdx.y + threadIdx.y;
                 % if order == cuir.LoopOrder.PARALLEL:
                 const int _k_block = blockIdx.z;
                 sid::shift(_ptr,
@@ -341,6 +343,14 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         """
     )
 
+    def visit_Kernel(self, node: cuir.Kernel, kernel_extents: List[str], **kwargs: Any) -> str:
+        kernel_extents.append(
+            self.visit(
+                cuir.IJExtent.zero().union(*node.iter_tree().if_isinstance(cuir.IJExtent)), **kwargs
+            )
+        )
+        return self.generic_visit(node, **kwargs)
+
     Kernel = as_mako(
         """
         % for vertical_loop in vertical_loops:
@@ -375,18 +385,26 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             return "0"
 
         def loop_fields(vertical_loop: cuir.VerticalLoop) -> Set[str]:
-            return (
+            fields = (
                 vertical_loop.iter_tree().if_isinstance(cuir.FieldAccess).getattr("name").to_set()
             )
+            if vertical_loop.has_horizontal_masks:
+                fields.update({"i_pos", "j_pos"})
+            return fields
 
         def ctype(symbol: str) -> str:
             return self.visit(kwargs["symtable"][symbol].dtype, **kwargs)
 
+        kernel_extents: List[str] = []
         return self.generic_visit(
             node,
             max_extent=self.visit(
                 cuir.IJExtent.zero().union(*node.iter_tree().if_isinstance(cuir.IJExtent)), **kwargs
             ),
+            is_positional=any(
+                node.iter_tree().if_isinstance(cuir.VerticalLoop).getattr("has_horizontal_masks")
+            ),
+            kernel_extents=kernel_extents,
             loop_start=loop_start,
             loop_fields=loop_fields,
             ctype=ctype,
@@ -410,6 +428,9 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         #include <gridtools/stencil/common/extent.hpp>
         #include <gridtools/stencil/gpu/launch_kernel.hpp>
         #include <gridtools/stencil/gpu/tmp_storage_sid.hpp>
+        % if is_positional:
+        #include <gridtools/stencil/positional.hpp>
+        % endif
 
         namespace ${name}_impl_{
             using namespace gridtools;
@@ -445,6 +466,10 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                     const int k_size = domain[2];
                     const int i_blocks = (i_size + i_block_size_t() - 1) / i_block_size_t();
                     const int j_blocks = (j_size + j_block_size_t() - 1) / j_block_size_t();
+                    % if is_positional:
+                    auto i_pos = positional<dim::i>();
+                    auto j_pos = positional<dim::j>();
+                    % endif
 
                     % for tmp in temporaries:
                         auto ${tmp} = gpu_backend::make_tmp_storage<${ctype(tmp)}>(
@@ -458,7 +483,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                             tmp_alloc);
                     % endfor
 
-                    % for kernel in _this_node.kernels:
+                    % for index, kernel in enumerate(_this_node.kernels):
 
                         // kernel ${id(kernel)}
 
@@ -476,7 +501,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                                 >(
 
                             % for field in loop_fields(vertical_loop):
-                                % if field in params:
+                                % if field in params or field.endswith("_pos"):
                                     block(sid::shift_sid_origin(
                                         ${field},
                                         offset_${id(vertical_loop)}
@@ -502,7 +527,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                         kernel_${id(kernel)}_f<${', '.join(f'decltype(loop_{id(vl)})' for vl in kernel.vertical_loops)}> kernel_${id(kernel)}{
                             ${', '.join(f'loop_{id(vl)}' for vl in kernel.vertical_loops)}
                         };
-                        gpu_backend::launch_kernel<${max_extent},
+                        gpu_backend::launch_kernel<${kernel_extents[index]},
                             i_block_size_t::value, j_block_size_t::value>(
                             i_size,
                             j_size,
