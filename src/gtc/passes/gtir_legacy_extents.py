@@ -42,15 +42,21 @@ class LegacyExtentsVisitor(NodeVisitor):
         ctx = self.StencilContext()
         for horizontal_region in node.iter_tree().if_isinstance(gtir.HorizontalRegion):
             self.visit(
-                horizontal_region, ctx=ctx, field_extents=field_extents, horizontal_masks=horizontal_masks
+                horizontal_region,
+                ctx=ctx,
+                field_extents=field_extents,
+                horizontal_masks=horizontal_masks,
             )
         for field_if in node.iter_tree().if_isinstance(gtir.FieldIfStmt):
             self.visit(field_if, ctx=ctx)
         for assign in reversed(_iter_assigns(node).to_list()):
-            self.visit(assign, ctx=ctx, field_extents=field_extents, horizontal_masks=horizontal_masks)
+            self.visit(
+                assign, ctx=ctx, field_extents=field_extents, horizontal_masks=horizontal_masks
+            )
         return field_extents
 
-    def visit_HorizontalRegion(self,
+    def visit_HorizontalRegion(
+        self,
         node: gtir.HorizontalRegion,
         horizontal_masks: Dict[int, common.HorizontalMask],
         **kwargs: Any,

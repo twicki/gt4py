@@ -80,9 +80,7 @@ class AccessCollector(NodeVisitor):
 
     def visit_MaskStmt(self, node: oir.MaskStmt, **kwargs: Any) -> None:
         self.visit(node.mask, is_write=False, **kwargs)
-        self.visit(
-            node.body, in_region=isinstance(node.mask, oir.HorizontalMask), **kwargs
-        )
+        self.visit(node.body, in_region=isinstance(node.mask, oir.HorizontalMask), **kwargs)
 
     def visit_While(self, node: oir.While, **kwargs: Any) -> None:
         self.visit(node.cond, is_write=False, **kwargs)
