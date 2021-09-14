@@ -126,11 +126,15 @@ class KCacheDetection(NodeTranslator):
         def offsets_within_limits(offsets: Set[Tuple[int, int, int]]) -> bool:
             return all(abs(offset[2]) <= self.max_cacheable_offset for offset in offsets)
 
-        accesses = AccessCollector.apply(node).offsets()
+        collection = AccessCollector.apply(node)
+        accesses = collection.offsets()
+        region_writes = collection.region_writes()
+
         cacheable = {
             field
             for field, offsets in accesses.items()
             if not already_cached(field)
+            and field not in region_writes
             and accessed_more_than_once(offsets)
             and not has_horizontal_offset(offsets)
             and offsets_within_limits(offsets)
