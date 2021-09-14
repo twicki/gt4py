@@ -57,10 +57,7 @@ class GTCGTExtGenerator:
     def __call__(self, definition_ir) -> Dict[str, Dict[str, str]]:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
-            skip=[
-                graph_merge_horizontal_executions,
-                FillFlushToLocalKCaches,
-            ]
+            skip=[graph_merge_horizontal_executions, FillFlushToLocalKCaches]
         )
         gtcpp = oir_to_gtcpp.OIRToGTCpp().visit(oir)
         format_source = self.backend.builder.options.format_source
