@@ -15,7 +15,8 @@ import numpy as np
 # from fv3core.stencils.xppm import compute_x_flux
 # from fv3core.stencils.yppm import compute_y_flux
 # from fv3core.stencils.xtp_u import _xtp_u
-from fv3core.stencils.fv_subgridz import init
+from fv3core.stencils.ytp_v import _ytp_v
+# from fv3core.stencils.fv_subgridz import init
 from fv3core.utils.mpi import MPI
 from fv3core.utils.typing import FloatField, FloatFieldIJ
 
@@ -38,18 +39,11 @@ from gt4py.gtscript import (
 )
 
 
-# from fv3core.stencils.updatedzd import (
-#     cubic_spline_interpolation_from_layer_center_to_interfaces,
-# )
-
-
-
-
-# gt_backend = "gtcuda"  # "gtx86"
-gt_backend = "gtc:cuda"
+gt_backend = "gtcuda"  # "gtx86"
+# gt_backend = "gtc:cuda"
 # gt_backend = "gtc:gt:gpu"
-np_backend = "numpy"
-# np_backend = "gtx86"
+# np_backend = "numpy"
+np_backend = "gtx86"
 
 
 def mask_from_shape(shape: tuple) -> tuple:
@@ -86,7 +80,7 @@ def main():
     vsize = hsize + 1
     nhalo = 3  # 2  # 1
 
-    definition_func = init
+    definition_func = _ytp_v
 
     data_file_prefix = sys.argv[1] if len(sys.argv) > 1 else definition_func.__name__
     is_parallel: bool = MPI is not None and MPI.COMM_WORLD.Get_size() > 1
@@ -107,7 +101,15 @@ def main():
         domain = (hsize, hsize, vsize)
 
     externals = input_data.pop("externals", {})
-    if not externals:
+    if externals:
+        externals = externals[()]
+        axes = {"I": I, "J": J}
+        for name, value in externals.items():
+            if isinstance(value, dict) and "axis" in value:
+                axis_index = axes[value["axis"]][value["index"]] + value["offset"]
+                assert axis_index.__dict__ == value
+                externals[name] = axis_index
+    else:
         grid_origin = (nhalo, nhalo, 0)
         grid_domain = (domain[0], domain[1], domain[2])
         # grid_domain = (domain[0] - 1, domain[1] - 1, domain[2])
