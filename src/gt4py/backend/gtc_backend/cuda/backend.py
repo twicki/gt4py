@@ -51,9 +51,14 @@ class GTCCudaExtGenerator:
 
     def __call__(self, definition_ir) -> Dict[str, Dict[str, str]]:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
-        oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
-            skip=[graph_merge_horizontal_executions, NoFieldAccessPruning]
-        )
+        oir_pipeline = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir))
+
+        skip_passes = [graph_merge_horizontal_executions, NoFieldAccessPruning]
+        pass_names = self.backend.builder.options.backend_opts.get("skip_passes", ())
+        if pass_names:
+            skip_passes += oir_pipeline.steps_from_names(list(pass_names))
+
+        oir = oir_pipeline.full(skip=skip_passes)
         cuir = oir_to_cuir.OIRToCUIR().visit(oir)
         cuir = kernel_fusion.FuseKernels().visit(cuir)
         cuir = extent_analysis.ComputeExtents().visit(cuir)
@@ -64,7 +69,10 @@ class GTCCudaExtGenerator:
             cuir, block_size=block_size, format_source=format_source
         )
         bindings = GTCCudaBindingsCodegen.apply(
-            cuir, module_name=self.module_name, backend=self.backend, format_source=format_source
+            cuir,
+            module_name=self.module_name,
+            backend=self.backend,
+            format_source=format_source,
         )
         return {
             "computation": {"computation.hpp": implementation},

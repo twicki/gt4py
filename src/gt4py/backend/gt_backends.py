@@ -727,6 +727,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         "add_profile_info": {"versioning": True, "type": bool},
         "clean": {"versioning": False, "type": bool},
         "debug_mode": {"versioning": True, "type": bool},
+        "skip_passes": {"versioning": True, "type": tuple},
         "verbose": {"versioning": False, "type": bool},
     }
 

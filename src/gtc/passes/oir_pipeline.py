@@ -79,6 +79,17 @@ class OirPipeline:
             FillFlushToLocalKCaches,
         ]
 
+    def steps_from_names(self, pass_names: Sequence[str]) -> Sequence[PASS_T]:
+        all_steps = self.steps()
+        named_steps = []
+        for step in all_steps:
+            if step.__name__ in pass_names:
+                named_steps.append(step)
+                pass_names.remove(step.__name__)
+        if pass_names:
+            raise RuntimeError(f"Unknown OIR pass names: {pass_names}")
+        return named_steps
+
     def apply(self, steps: Sequence[PASS_T]) -> oir.Stencil:
         result = self.oir
         for step in steps:
