@@ -161,6 +161,20 @@ class CUIRCodegen(codegen.TemplatedGenerator):
 
     IJExtent = as_fmt("extent<{i[0]}, {i[1]}, {j[0]}, {j[1]}>")
 
+    def visit_HorizontalExecution(self, node: cuir.HorizontalExecution, **kwargs: Any) -> str:
+        for assign in (
+            node.iter_tree()
+            .if_isinstance(cuir.AssignStmt)
+            .filter(
+                lambda assign: isinstance(assign.left, cuir.KCacheAccess)
+                and isinstance(assign.right, cuir.FieldAccess)
+            )
+        ):
+            assign.left.name = f"// {assign.left.name}"
+
+        code = self.generic_visit(node, **kwargs)
+        return code
+
     HorizontalExecution = as_mako(
         """
         // HorizontalExecution ${id(_this_node)}
@@ -197,7 +211,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
     KCacheDecl = as_mako(
         """
         % for var in _this_generator.k_cache_vars(_this_node):
-            ${dtype} ${var};
+            ${dtype} ${var} = ${name[:-1]}(0_c, 0_c, ${var[-1]}_c);
         % endfor
         """
     )
