@@ -32,9 +32,6 @@ from gtc import gtir_to_oir
 from gtc.common import DataType
 from gtc.cuir import cuir, cuir_codegen, extent_analysis, kernel_fusion, oir_to_cuir
 from gtc.passes.gtir_pipeline import GtirPipeline
-from gtc.passes.oir_dace_optimizations.horizontal_execution_merging import (
-    graph_merge_horizontal_executions,
-)
 from gtc.passes.oir_optimizations.pruning import NoFieldAccessPruning
 from gtc.passes.oir_pipeline import OirPipeline
 
@@ -53,10 +50,7 @@ class GTCCudaExtGenerator:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         oir_pipeline = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir))
         pass_names = self.backend.builder.options.backend_opts.get("skip_passes", ())
-        skip_passes = [
-            graph_merge_horizontal_executions,
-            NoFieldAccessPruning,
-        ] + oir_pipeline.steps_from_names(pass_names)
+        skip_passes = [NoFieldAccessPruning] + oir_pipeline.steps_from_names(pass_names)
         oir = oir_pipeline.full(skip=skip_passes)
         cuir = oir_to_cuir.OIRToCUIR().visit(oir)
         cuir = kernel_fusion.FuseKernels().visit(cuir)

@@ -9,14 +9,16 @@ import os
 import sys
 
 import numpy as np
+
 # from fv3core.stencils.delnflux import copy_corners_x_nord
 # from fv3core.stencils.delnflux import fx_calc_stencil_column
 # from fv3core.stencils.delnflux import d2_highorder_stencil
 # from fv3core.stencils.xppm import compute_x_flux
 # from fv3core.stencils.yppm import compute_y_flux
 # from fv3core.stencils.xtp_u import _xtp_u
-from fv3core.stencils.ytp_v import _ytp_v
 # from fv3core.stencils.fv_subgridz import init
+from fv3core.stencils.ytp_v import _ytp_v
+
 from fv3core.utils.mpi import MPI
 from fv3core.utils.typing import FloatField, FloatFieldIJ
 
@@ -39,8 +41,8 @@ from gt4py.gtscript import (
 )
 
 
-gt_backend = "gtcuda"  # "gtx86"
-# gt_backend = "gtc:cuda"
+# gt_backend = "gtcuda"  # "gtx86"
+gt_backend = "gtc:cuda"
 # gt_backend = "gtc:gt:gpu"
 # np_backend = "numpy"
 np_backend = "gtx86"
@@ -89,15 +91,10 @@ def main():
 
     origin = tuple(input_data.pop("origin", []))
     if not any(origin):
-        # origin = (nhalo, nhalo, 0)  # xppm, xtp_u
-        # origin = (0, nhalo, 0)    # yppm
         origin = (0, 0, 0)
 
     domain = tuple(input_data.pop("domain", []))
     if not any(domain):
-        # domain = (hsize - nhalo * 2 + 1, hsize - nhalo * 2, vsize)  # xppm
-        # domain = (hsize - 0 * 2, hsize - nhalo * 2 + 1, vsize)  # yppm
-        # domain = (hsize - 2 * nhalo + 1, hsize - 2 * nhalo + 1, vsize)  # xtp_u
         domain = (hsize, hsize, vsize)
 
     externals = input_data.pop("externals", {})
@@ -109,42 +106,15 @@ def main():
                 axis_index = axes[value["axis"]][value["index"]] + value["offset"]
                 assert axis_index.__dict__ == value
                 externals[name] = axis_index
-    else:
-        grid_origin = (nhalo, nhalo, 0)
-        grid_domain = (domain[0], domain[1], domain[2])
-        # grid_domain = (domain[0] - 1, domain[1] - 1, domain[2])
 
-        i_start = I[0] + grid_origin[0] - origin[0]
-        i_end = I[-1] + (origin[0] + domain[0]) - (grid_origin[0] + grid_domain[0]) - 1
-        j_start = J[0] + grid_origin[1] - origin[1]
-        j_end = J[-1] + (origin[1] + domain[1]) - (grid_origin[1] + grid_domain[1]) - 1
-        # local_is = I[0] - origin[0]
-        # local_ie = I[-1] + 0 - origin[0] - domain[0] + 1
-        # local_js = J[0] + 0 - origin[1]
-        # local_je = J[-1] + 0 - origin[1] - domain[1] + 1
-
-        externals = {
-            # "i_start": i_start,
-            # "i_end": i_end,
-            # "iord": 6,
-            # "j_start": j_start,
-            # "j_end": j_end,
-            # "jord": 6,
-            # "mord": 6,
-            # "xt_minmax": True,   # yppm
-            # "xt_minmax": False,  # xtp_u
-            # "nord0": 2.0,
-            # "nord1": 2.0,
-            # "nord2": 2.0,
-            # "nord3": 2.0,
-        }
-
+    # GreedyMerging causes the illegal memory errors...
     do_rebuild: bool = True
     gt_stencil = stencil(
         definition=definition_func,
         backend=gt_backend,
         externals=externals,
         rebuild=do_rebuild,
+        skip_passes=("GreedyMerging",),
     )
     np_stencil = stencil(
         definition=definition_func,
@@ -167,7 +137,9 @@ def main():
     for _ in range(n_runs):
         exec_info = {}
         gt_stencil(domain=domain, origin=origin, exec_info=exec_info, **gt_storages)
-        cpp_run_time = (exec_info["run_cpp_end_time"] - exec_info["run_cpp_start_time"]) * 1e3
+        cpp_run_time = (
+            exec_info["run_cpp_end_time"] - exec_info["run_cpp_start_time"]
+        ) * 1e3
         total_time += cpp_run_time
     mean_time = total_time / float(n_runs)
     print(f"mean_time (backend={gt_backend}, domain={domain}) = {mean_time}")
@@ -186,7 +158,9 @@ def main():
             gt_array, np_array = array_tuple
             diff_array = gt_array - np_array
             diff_indices = np.transpose(diff_array[:, :, 0].nonzero())
-            fail_ratio = diff_indices.shape[0] / (diff_array.shape[0] * diff_array.shape[1])
+            fail_ratio = diff_indices.shape[0] / (
+                diff_array.shape[0] * diff_array.shape[1]
+            )
 
             # print(f"np_array = {np_array[:, :, 0]}")
             # print(f"gt_array = {gt_array[:, :, 0]}")
