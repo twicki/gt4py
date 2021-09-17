@@ -35,9 +35,7 @@ class LegacyExtentsVisitor(NodeVisitor):
         for region in node.iter_tree().if_isinstance(gtir.HorizontalRegion):
             self.visit(region, ctx=ctx)
         for assign in reversed(_iter_assigns(node).to_list()):
-            self.visit(
-                assign, ctx=ctx, field_extents=field_extents, horizontal_masks=horizontal_masks
-            )
+            self.visit(assign, ctx=ctx, field_extents=field_extents)
         return field_extents
 
     def visit_HorizontalRegion(
