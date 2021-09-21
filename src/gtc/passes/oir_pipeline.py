@@ -65,7 +65,6 @@ class OirPipeline:
     def steps(self) -> Sequence[PASS_T]:
         return [
             RemoveUnexecutedRegions,
-            graph_merge_horizontal_executions,
             GreedyMerging,
             AdjacentLoopMerging,
             LocalTemporariesToScalars,
@@ -73,6 +72,7 @@ class OirPipeline:
             OnTheFlyMerging,
             MaskStmtMerging,
             MaskInlining,
+            graph_merge_horizontal_executions,
             NoFieldAccessPruning,
             IJCacheDetection,
             KCacheDetection,
