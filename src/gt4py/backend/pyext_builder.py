@@ -272,7 +272,7 @@ def build_pybind_cuda_ext(
     library_dirs = library_dirs or []
     library_dirs = [*library_dirs, gt_config.build_settings["cuda_library_path"]]
     libraries = libraries or []
-    libraries = [*libraries, "cudart"]
+    libraries = [*libraries, "cuda", "cudart"]
     extra_compile_args = extra_compile_args or []
 
     return build_pybind_ext(
