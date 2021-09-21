@@ -114,7 +114,6 @@ def main():
         backend=gt_backend,
         externals=externals,
         rebuild=do_rebuild,
-        skip_passes=("GreedyMerging",),
     )
     np_stencil = stencil(
         definition=definition_func,
@@ -132,7 +131,7 @@ def main():
     gt_storages = arrays_to_storages(input_data, gt_backend, origin)
     np_storages = arrays_to_storages(input_data, np_backend, origin)
 
-    n_runs = 1
+    n_runs = 9
     total_time = 0.0
     for _ in range(n_runs):
         exec_info = {}
