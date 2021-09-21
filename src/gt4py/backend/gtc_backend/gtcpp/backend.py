@@ -38,6 +38,7 @@ from gtc.common import DataType
 from gtc.gtcpp import gtcpp, gtcpp_codegen, oir_to_gtcpp
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
+from gtc.passes.oir_optimizations.remove_regions import RemoveUnexecutedRegions
 from gtc.passes.oir_pipeline import OirPipeline
 
 
@@ -55,7 +56,10 @@ class GTCGTExtGenerator:
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         oir_pipeline = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir))
         pass_names = self.backend.builder.options.backend_opts.get("skip_passes", ())
-        skip_passes = [FillFlushToLocalKCaches] + oir_pipeline.steps_from_names(pass_names)
+        skip_passes = [
+            RemoveUnexecutedRegions,
+            FillFlushToLocalKCaches,
+        ] + oir_pipeline.steps_from_names(pass_names)
         oir = oir_pipeline.full(skip=skip_passes)
         gtcpp = oir_to_gtcpp.OIRToGTCpp().visit(oir)
         format_source = self.backend.builder.options.format_source
