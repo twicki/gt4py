@@ -438,13 +438,8 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             using namespace stencil;
 
             using domain_t = std::array<unsigned, 3>;
-            % if block_size is None:
             using i_block_size_t = integral_constant<int, 64>;
             using j_block_size_t = integral_constant<int, 8>;
-            % else:
-            using i_block_size_t = integral_constant<int, ${block_size[0]}>;
-            using j_block_size_t = integral_constant<int, ${block_size[1]}>;
-            % endif
 
             template <class Storage>
             auto block(Storage storage) {
