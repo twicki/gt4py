@@ -23,7 +23,7 @@ from devtools import debug  # noqa: F401
 import eve
 from eve.iterators import TreeIterationItem
 from gtc import common, oir
-from gtc.common import CartesianOffset, VariableOffset
+from gtc.common import CartesianOffset
 from gtc.gtcpp import gtcpp
 
 
