@@ -85,7 +85,11 @@ DomainSpec = Tuple[Optional[DomainBounds], Optional[DomainBounds], Optional[Doma
 
 
 def get_horizontal_restriction(
-    horiz_mask: npir.HorizontalMask, **kwargs: Any
+    horiz_mask: npir.HorizontalMask,
+    *,
+    lower: Tuple[int, int],
+    upper: Tuple[int, int],
+    **kwargs: Any,
 ) -> Tuple[DomainBounds, DomainBounds]:
     def base_and_offset(bound: common.AxisBound, axis: str) -> Tuple[str, int]:
         return (
@@ -93,7 +97,7 @@ def get_horizontal_restriction(
             bound.offset,
         )
 
-    horizontal_extent = kwargs.get("ij_extents", ((0, 0), (0, 0)))
+    horizontal_extent = ((-lower[0], upper[0]), (-lower[1], upper[1]))
     rel_mask: Optional[common.HorizontalMask] = utils.compute_relative_mask(
         horizontal_extent, horiz_mask
     )
