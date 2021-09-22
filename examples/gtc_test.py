@@ -107,7 +107,6 @@ def main():
                 assert axis_index.__dict__ == value
                 externals[name] = axis_index
 
-    # GreedyMerging causes the illegal memory errors...
     do_rebuild: bool = True
     gt_stencil = stencil(
         definition=definition_func,
