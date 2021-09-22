@@ -14,10 +14,13 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import functools
 import textwrap
+from dataclasses import dataclass, field
 from typing import Any, Collection, Dict, Optional, Tuple, Union, cast
 
 from eve.codegen import FormatTemplate, JinjaTemplate, TemplatedGenerator
+from eve.visitors import NodeVisitor
 from gt4py.definitions import Extent
 from gtc import common
 from gtc.passes import utils
@@ -82,11 +85,7 @@ DomainSpec = Tuple[Optional[DomainBounds], Optional[DomainBounds], Optional[Doma
 
 
 def get_horizontal_restriction(
-    horiz_mask: npir.HorizontalMask,
-    *,
-    h_lower: Tuple[int, int] = (0, 0),
-    h_upper: Tuple[int, int] = (0, 0),
-    **kwargs: Any,
+    horiz_mask: npir.HorizontalMask, **kwargs: Any
 ) -> Tuple[DomainBounds, DomainBounds]:
     def base_and_offset(bound: common.AxisBound, axis: str) -> Tuple[str, int]:
         return (
@@ -94,7 +93,7 @@ def get_horizontal_restriction(
             bound.offset,
         )
 
-    horizontal_extent = Extent(((-h_lower[0], h_upper[0]), (-h_lower[1], h_upper[1]), (0, 0)))
+    horizontal_extent = kwargs.get("ij_extents", ((0, 0), (0, 0)))
     rel_mask: Optional[common.HorizontalMask] = utils.compute_relative_mask(
         horizontal_extent, horiz_mask
     )
@@ -133,6 +132,57 @@ def compute_axis_bounds(
     uoffset = bounds[1][1] + offset
     upper = lpar(uoffset) + f"{bounds[1][0]}{offset_str(uoffset)}" + rpar(uoffset)
     return lower, upper
+
+
+def slice_to_extent(acc: npir.FieldSlice) -> Extent:
+    return Extent(
+        (
+            [acc.i_offset.offset.value] * 2 if acc.i_offset else (0, 0),
+            [acc.j_offset.offset.value] * 2 if acc.j_offset else (0, 0),
+            [acc.k_offset.offset.value] * 2 if acc.k_offset else (0, 0),
+        )
+    )
+
+
+HorizontalExtent = Tuple[Tuple[int, int], Tuple[int, int]]
+
+
+class ExtentCalculator(NodeVisitor):
+    @dataclass
+    class Context:
+        field_extents: Dict[str, Extent] = field(default_factory=dict)
+        block_extents: Dict[int, HorizontalExtent] = field(default_factory=dict)
+
+    def visit_Computation(self, node: npir.Computation):
+        ctx = self.Context()
+        for vertical_pass in reversed(node.vertical_passes):
+            self.visit(vertical_pass, ctx=ctx)
+        return ctx.field_extents, ctx.block_extents
+
+    def visit_VerticalPass(self, node: npir.VerticalPass, *, ctx: Context):
+        for block in reversed(node.body):
+            self.visit(block, ctx=ctx)
+
+    def visit_HorizontalBlock(self, node: npir.HorizontalBlock, *, ctx: Context):
+        writes = (
+            node.iter_tree()
+            .if_isinstance(npir.VectorAssign)
+            .getattr("left")
+            .if_isinstance(npir.FieldSlice)
+            .getattr("name")
+            .to_set()
+        )
+        extent = functools.reduce(
+            lambda ext, name: ext | ctx.field_extents.get(name, Extent.zeros()),
+            writes,
+            Extent.zeros(),
+        )
+        ctx.block_extents[id(node)] = extent[:-1]
+
+        for acc in node.iter_tree().if_isinstance(npir.FieldSlice).to_list():
+            ctx.field_extents[acc.name] = ctx.field_extents.get(acc.name, Extent.zeros()).union(
+                extent + slice_to_extent(acc)
+            )
 
 
 class NpirGen(TemplatedGenerator):
@@ -218,6 +268,9 @@ class NpirGen(TemplatedGenerator):
             for off, bounds in zip(offset, domain)
         )
 
+        if node.data_index:
+            offset_str += ", " + ", ".join(str(x) for x in node.data_index)
+
         if is_rhs and mask_acc and any(off is None for off in offset):
             axes_bounds = (
                 compute_axis_bounds(bounds, axis_name, 0)
@@ -227,6 +280,10 @@ class NpirGen(TemplatedGenerator):
             broadcast_str = (
                 ",".join([f"{upper}-{lower}" for lower, upper in axes_bounds]) + f", {k_size}"
             )
+
+            if node.data_index:
+                broadcast_str += ", " + ", ".join(["1"] * len(node.data_index))
+
             arr_expr = f"np.broadcast_to({node.name}_[{offset_str}], ({broadcast_str}))"
         else:
             arr_expr = f"{node.name}_[{offset_str}]"
@@ -350,27 +407,21 @@ class NpirGen(TemplatedGenerator):
     )
 
     def visit_HorizontalBlock(
-        self, node: npir.HorizontalBlock, **kwargs
+        self,
+        node: npir.HorizontalBlock,
+        *,
+        block_extents: Dict[int, HorizontalExtent] = None,
+        **kwargs: Any,
     ) -> Union[str, Collection[str]]:
-        lower, upper = [0, 0], [0, 0]
-
-        if extents := kwargs.get("field_extents"):
-            fields = set(node.iter_tree().if_isinstance(npir.FieldSlice).getattr("name"))
-            for field in fields:
-                # The extent of masks has not yet been collected but is always zero.
-                extents.setdefault(field, Extent.zeros())
-            lower[0] = min(extents[field].to_boundary()[0][0] for field in fields)
-            lower[1] = min(extents[field].to_boundary()[1][0] for field in fields)
-            upper[0] = min(extents[field].to_boundary()[0][1] for field in fields)
-            upper[1] = min(extents[field].to_boundary()[1][1] for field in fields)
-        return self.generic_visit(node, h_lower=lower, h_upper=upper, **kwargs)
+        ij_extents = (block_extents or {}).get(id(node), ((0, 0), (0, 0)))
+        return self.generic_visit(node, ij_extents=ij_extents, **kwargs)
 
     HorizontalBlock = JinjaTemplate(
         textwrap.dedent(
             """\
             # --- begin horizontal block --
-            i, I = _di_ - {{ h_lower[0] }}, _dI_ + {{ h_upper[0] }}
-            j, J = _dj_ - {{ h_lower[1] }}, _dJ_ + {{ h_upper[1] }}
+            i, I = _di_ {{ '{:+d}'.format(ij_extents[0][0]) }}, _dI_ {{ '{:+d}'.format(ij_extents[0][1]) }}
+            j, J = _dj_ {{ '{:+d}'.format(ij_extents[1][0]) }}, _dJ_ {{ '{:+d}'.format(ij_extents[1][1]) }}
             {% for assign in body %}{{ assign }}
             {% endfor %}# --- end horizontal block --
 
@@ -379,14 +430,16 @@ class NpirGen(TemplatedGenerator):
     )
 
     def visit_Computation(
-        self, node: npir.Computation, *, field_extents: Dict[str, Extent], **kwargs: Any
+        self, node: npir.Computation, **kwargs: Any
     ) -> Union[str, Collection[str]]:
         signature = ["*", *node.params, "_domain_", "_origin_"]
-        kwargs["field_extents"] = field_extents
+        field_extents, block_extents = ExtentCalculator().visit(node)
         return self.generic_visit(
             node,
             signature=", ".join(signature),
             data_view_class=ORIGIN_CORRECTED_VIEW_CLASS,
+            field_extents=field_extents,
+            block_extents=block_extents,
             **kwargs,
         )
 

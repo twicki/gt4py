@@ -115,6 +115,7 @@ class FieldSlice(VectorExpression, VectorLValue):
     i_offset: Optional[AxisOffset] = None
     j_offset: Optional[AxisOffset] = None
     k_offset: Optional[AxisOffset] = None
+    data_index: List[int] = []
 
 
 class NamedScalar(common.ScalarAccess, Expr):

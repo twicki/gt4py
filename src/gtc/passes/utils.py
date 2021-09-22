@@ -103,7 +103,7 @@ def _compute_relative_interval(
 
 
 def compute_relative_mask(
-    extent: Extent, mask: common.HorizontalMask
+    extent: Tuple[Tuple[int, int], Tuple[int, int]], mask: common.HorizontalMask
 ) -> Optional[common.HorizontalMask]:
     """Compute a HorizontalMask relative to the compute extent in `extent`.
 
