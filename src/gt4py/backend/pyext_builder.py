@@ -76,10 +76,12 @@ def get_gt_pyext_build_opts(
 
     import dace
 
+    template_depth: int = 1024
+
     extra_compile_args = dict(
         cxx=[
             "-std=c++14",
-            "-ftemplate-depth=1024",
+            f"-ftemplate-depth={template_depth}",
             "-fvisibility=hidden",
             "-fPIC",
             "-isystem{}".format(gt_include_path),
@@ -90,6 +92,7 @@ def get_gt_pyext_build_opts(
         ],
         nvcc=[
             "-std=c++14",
+            f"-ftemplate-depth={template_depth}",
             "-arch=sm_{}".format(cuda_arch),
             "-isystem={}".format(gt_include_path),
             "-isystem={}".format(gt_config.build_settings["boost_include_path"]),
