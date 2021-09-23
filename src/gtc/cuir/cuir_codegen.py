@@ -20,7 +20,7 @@ from eve import codegen, traits
 from eve.codegen import FormatTemplate as as_fmt
 from eve.codegen import MakoTemplate as as_mako
 from eve.concepts import LeafNode
-from gtc.common import BuiltInLiteral, DataType, LevelMarker, NativeFunction, UnaryOperator
+from gtc.common import BuiltInLiteral, DataType, LevelMarker, LocNode, NativeFunction, UnaryOperator
 from gtc.cuir import cuir
 
 
@@ -55,6 +55,14 @@ class CUIRCodegen(codegen.TemplatedGenerator):
     )
 
     FieldAccess = as_mako("${name}(${offset}${''.join(f', {i}_c' for i in _this_node.data_index)})")
+
+    def visit_For(self, node: cuir.For, **kwargs):
+        op = "<" if node.inc > 0 else ">"
+        start = self.visit(node.start, **kwargs)
+        end = self.visit(node.end, **kwargs)
+        body = "\n".join(self.visit(node.body, **kwargs))
+        code = f"for({node.target_name} = {start}; {node.target_name} {op} {end}; {node.target_name} += {node.inc}) {{ {body} }}"
+        return code
 
     def visit_IJCacheAccess(
         self, node: cuir.IJCacheAccess, symtable: Dict[str, Any], **kwargs: Any
@@ -251,6 +259,16 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             for offset in range(k_cache.extent.k[0], k_cache.extent.k[1] + 1)
         ]
 
+    @classmethod
+    def positional_accesses(cls, node: LocNode) -> Set[str]:
+        return (
+            node.iter_tree()
+            .if_isinstance(cuir.ScalarAccess)
+            .filter(lambda acc: "_pos" in acc.name)
+            .getattr("name")
+            .to_set()
+        )
+
     def visit_VerticalLoop(
         self, node: cuir.VerticalLoop, *, symtable: Dict[str, Any], **kwargs: Any
     ) -> Union[str, Collection[str]]:
@@ -261,8 +279,9 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             .map(lambda x: (x[0], len(x[1])))
             .to_set()
         )
-        if node.has_horizontal_masks:
-            fields.update([(f"{index}_pos", 0) for index in "ij"])
+        pos_accesses = CUIRCodegen.positional_accesses(node)
+        if pos_accesses:
+            fields.update(set([(access.split("(")[0], 0) for access in pos_accesses]))
         return self.generic_visit(
             node,
             fields=fields,
@@ -388,8 +407,9 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             fields = (
                 vertical_loop.iter_tree().if_isinstance(cuir.FieldAccess).getattr("name").to_set()
             )
-            if vertical_loop.has_horizontal_masks:
-                fields.update({"i_pos", "j_pos"})
+            pos_accesses = CUIRCodegen.positional_accesses(vertical_loop)
+            if pos_accesses:
+                fields.update(set([access.split("(")[0] for access in pos_accesses]))
             return fields
 
         def ctype(symbol: str) -> str:
@@ -401,9 +421,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
             max_extent=self.visit(
                 cuir.IJExtent.zero().union(*node.iter_tree().if_isinstance(cuir.IJExtent)), **kwargs
             ),
-            is_positional=any(
-                node.iter_tree().if_isinstance(cuir.VerticalLoop).getattr("has_horizontal_masks")
-            ),
+            is_positional=CUIRCodegen.positional_accesses(node),
             kernel_extents=kernel_extents,
             loop_start=loop_start,
             loop_fields=loop_fields,
@@ -469,6 +487,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                     % if is_positional:
                     auto i_pos = positional<dim::i>();
                     auto j_pos = positional<dim::j>();
+                    auto k_pos = positional<dim::k>();
                     % endif
 
                     % for tmp in temporaries:
