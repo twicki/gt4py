@@ -34,9 +34,11 @@ from gtc.gtir import (
 
 from .gtir_utils import (
     BinaryOpFactory,
+    FieldAccessFactory,
     FieldDeclFactory,
     FieldIfStmtFactory,
     ParAssignStmtFactory,
+    ScalarAccessFactory,
     StencilFactory,
     VerticalLoopFactory,
     WhileFactory,
@@ -221,3 +223,12 @@ def test_while_with_accumulated_extents():
                 ParAssignStmtFactory(left__name="b", right__name="a"),
             ],
         )
+
+
+def test_indirect_address_data_dims():
+    # Integer expressions are OK
+    FieldAccessFactory(data_index=[ScalarAccessFactory(dtype=DataType.INT32)])
+
+    # ... but others are not
+    with pytest.raises(ValueError, match="must be integer expressions"):
+        FieldAccessFactory(data_index=[ScalarAccessFactory(dtype=DataType.FLOAT32)])
