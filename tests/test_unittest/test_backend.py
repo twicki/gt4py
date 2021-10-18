@@ -146,7 +146,7 @@ def test_generate_post_run(backend_name, mode):
 @pytest.mark.parametrize("backend_name", GPU_BACKENDS)
 @pytest.mark.parametrize("mode", (2,))
 @pytest.mark.parametrize("device_sync", (True, False))
-def test_device_sync_option(backend_name, mode, device_sync):
+def test_device_sync_option_effective(backend_name, mode, device_sync):
     backend_cls = backend_registry[backend_name]
     builder = StencilBuilder(stencil_def, backend=backend_cls).with_externals({"MODE": mode})
     builder.options.backend_opts["device_sync"] = device_sync
