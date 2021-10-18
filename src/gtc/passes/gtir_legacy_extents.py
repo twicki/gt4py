@@ -16,6 +16,15 @@ def _iter_assigns(node: gtir.Stencil) -> XIterable[gtir.ParAssignStmt]:
     return node.iter_tree().if_isinstance(gtir.ParAssignStmt)
 
 
+def _ext_from_off(offset: gtir.CartesianOffset) -> Extent:
+    return Extent(
+        ((min(offset.i, 0), max(offset.i, 0)), (min(offset.j, 0), max(offset.j, 0)), (0, 0))
+    )
+
+
+FIELD_EXT_T = Dict[str, Extent]
+
+
 class LegacyExtentsVisitor(NodeVisitor):
     def __init__(self, allow_negative=False):
         self._allow_negative = allow_negative

@@ -23,9 +23,7 @@ definitions for the keywords of the DSL.
 import collections
 import copy
 import inspect
-import itertools
 import numbers
-import operator
 import os
 import re
 import types
