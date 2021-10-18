@@ -17,7 +17,7 @@
 import functools
 import textwrap
 from dataclasses import dataclass, field
-from typing import Any, Collection, Dict, Tuple, Union
+from typing import Any, Collection, Dict, Optional, Tuple, Union
 
 from eve.codegen import FormatTemplate, JinjaTemplate, TemplatedGenerator
 from eve.visitors import NodeVisitor
