@@ -71,4 +71,4 @@ def gtscript_loader(
         build_options.name = f"{definition_func.__name__}"
     stencil_class = load_stencil("gtscript", backend, definition_func, externals, build_options)
 
-    return stencil_class()
+    return stencil_class() if stencil_class else None

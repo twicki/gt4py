@@ -174,7 +174,10 @@ class GTCCudaBackend(BaseGTBackend, CLIBackendMixin):
         pyext_module_name, pyext_file_path = self.generate_extension()
 
         # Generate and return the Python wrapper class
-        return self.make_module(
-            pyext_module_name=pyext_module_name,
-            pyext_file_path=pyext_file_path,
-        )
+        if pyext_module_name and pyext_file_path:
+            # Generate and return the Python wrapper class
+            return self.make_module(
+                pyext_module_name=pyext_module_name,
+                pyext_file_path=pyext_file_path,
+            )
+        return None

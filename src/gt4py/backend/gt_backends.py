@@ -728,6 +728,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         "add_profile_info": {"versioning": True, "type": bool},
         "clean": {"versioning": False, "type": bool},
         "debug_mode": {"versioning": True, "type": bool},
+        "disable_build": {"versioning": False, "type": bool},
         "pass_order": {"versioning": True, "type": dict},
         "verbose": {"versioning": False, "type": bool},
     }
@@ -830,12 +831,16 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
             ),
         )
 
-        result = self.build_extension_module(gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda)
+        module_name, file_path = None, None
+        if not self.builder.options.backend_opts.get("disable_build", False):
+            module_name, file_path = self.build_extension_module(
+                gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda
+            )
 
         if build_info is not None:
             build_info["build_time"] = time.perf_counter() - start_time
 
-        return result
+        return module_name, file_path
 
     def make_extension_sources(self, *, ir) -> Dict[str, Dict[str, str]]:
         """Generate the source for the stencil independently from use case."""
