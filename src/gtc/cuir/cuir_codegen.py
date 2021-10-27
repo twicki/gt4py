@@ -505,10 +505,6 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                     auto k_pos = positional<dim::k>();
                     % endif
 
-                    % if is_positional:
-                    auto k_pos = positional<dim::k>();
-                    % endif
-
                     % for tmp in temporaries:
                         auto ${tmp} = gpu_backend::make_tmp_storage<${ctype(tmp)}>(
                             1_c,
