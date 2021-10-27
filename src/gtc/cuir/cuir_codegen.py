@@ -73,8 +73,7 @@ class CUIRCodegen(codegen.TemplatedGenerator):
         start = self.visit(node.start, **kwargs)
         end = self.visit(node.end, **kwargs)
         body = "\n".join(self.visit(node.body, **kwargs))
-        code = f"for({node.target_name} = {start}; {node.target_name} {op} {end}; {node.target_name} += {node.inc}) {{ {body} }}"
-        return code
+        return f"for({node.target_name} = {start}; {node.target_name} {op} {end}; {node.target_name} += {node.inc}) {{ {body} }}"
 
     def visit_IJCacheAccess(
         self, node: cuir.IJCacheAccess, symtable: Dict[str, Any], **kwargs: Any
@@ -503,6 +502,10 @@ class CUIRCodegen(codegen.TemplatedGenerator):
                     % if is_positional:
                     auto i_pos = positional<dim::i>();
                     auto j_pos = positional<dim::j>();
+                    auto k_pos = positional<dim::k>();
+                    % endif
+
+                    % if is_positional:
                     auto k_pos = positional<dim::k>();
                     % endif
 

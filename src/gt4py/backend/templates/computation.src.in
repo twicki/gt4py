@@ -187,6 +187,10 @@ using p_{{ field.name }} = gt::tmp_arg<{{ arg_counter + loop.index0 }}, typename
 {% set arg_counter = arg_counter + tmp_fields|length %}
 {%- endif %}
 
+// Computation
+using computation_t =
+    gt::computation<p_{{ (arg_fields|list)|map(attribute='name')|join(", p_")}}>;
+
 
 // Constants
 {% for name, value in constants.items() %}
