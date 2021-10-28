@@ -298,7 +298,7 @@ class BaseBackend(Backend):
         file_path = self.builder.module_path
         module_source = self.make_module_source(**kwargs)
 
-        if not self.builder.options._impl_opts.get("disable-code-generation", False):
+        if not self.builder.options.backend_opts.get("disable_code_generation", False):
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(module_source)
             self.builder.caching.update_cache_info()
