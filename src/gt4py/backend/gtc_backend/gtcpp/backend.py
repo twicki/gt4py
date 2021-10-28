@@ -154,13 +154,11 @@ class GTCGTBaseBackend(BaseGTBackend, CLIBackendMixin):
         # TODO(havogt) add bypass if computation has no effect
         pyext_module_name, pyext_file_path = self.generate_extension()
 
-        if pyext_module_name and pyext_file_path:
-            # Generate and return the Python wrapper class
-            return self.make_module(
-                pyext_module_name=pyext_module_name,
-                pyext_file_path=pyext_file_path,
-            )
-        return None
+        # Generate and return the Python wrapper class
+        return self.make_module(
+            pyext_module_name=pyext_module_name,
+            pyext_file_path=pyext_file_path,
+        )
 
 
 @gt_backend.register
