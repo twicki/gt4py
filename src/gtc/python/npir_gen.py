@@ -324,9 +324,6 @@ class NpirGen(TemplatedGenerator):
         )
 
         if node.data_index:
-            offset_str += ", " + ", ".join(str(x) for x in node.data_index)
-
-        if node.data_index:
             offset_str += ", " + ", ".join(self.visit(x, **kwargs) for x in node.data_index)
 
         if mask_acc and any(off is None for off in offset):
