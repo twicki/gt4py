@@ -62,16 +62,19 @@ class GTCDaCeExtGenerator:
         sdfg.expand_library_nodes(recursive=True)
         sdfg.apply_strict_transformations(validate=True)
 
-        implementation = DaCeComputationCodegen.apply(gtir, sdfg)
-        bindings = DaCeBindingsCodegen.apply(
-            gtir, sdfg, module_name=self.module_name, backend=self.backend
-        )
+        sources: Dict[str, str] = {}
+        if not self.backend.builder.options.backend_opts.get("disable_code_generation", False):
+            implementation = DaCeComputationCodegen.apply(gtir, sdfg)
+            bindings = DaCeBindingsCodegen.apply(
+                gtir, sdfg, module_name=self.module_name, backend=self.backend
+            )
 
-        bindings_ext = ".cu" if self.backend.GT_BACKEND_T == "gpu" else ".cpp"
-        return {
-            "computation": {"computation.hpp": implementation},
-            "bindings": {"bindings" + bindings_ext: bindings},
-        }
+            bindings_ext = ".cu" if self.backend.GT_BACKEND_T == "gpu" else ".cpp"
+            sources = {
+                "computation": {"computation.hpp": implementation},
+                "bindings": {"bindings" + bindings_ext: bindings},
+            }
+        return sources
 
 
 class KOriginsVisitor(NodeVisitor):

@@ -746,15 +746,14 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
             # in the GTC backend, `ir` is the definition_ir
             ir = self.builder.implementation_ir
         # Generate source
-        if not self.builder.options.backend_opts.get("disable_code_generation", False):
+        if not self.builder.options._impl_opts.get("disable-code-generation", False):
             gt_pyext_sources: Dict[str, Any] = self.make_extension_sources(ir=ir)
             gt_pyext_sources = {**gt_pyext_sources["computation"], **gt_pyext_sources["bindings"]}
         else:
             # Pass NOTHING to the self.builder means try to reuse the source code files
-            template_files = self.PYEXT_GENERATOR_CLASS.TEMPLATE_FILES if (
-                hasattr(self.PYEXT_GENERATOR_CLASS, "TEMPLATE_FILES")
-            ) else {}
-            gt_pyext_sources = {key: gt_utils.NOTHING for key in template_files.keys()}
+            gt_pyext_sources = {
+                key: gt_utils.NOTHING for key in self.PYEXT_GENERATOR_CLASS.TEMPLATE_FILES.keys()
+            }
 
         if build_info is not None:
             next_time = time.perf_counter()
