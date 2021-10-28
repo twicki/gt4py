@@ -670,7 +670,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         "add_profile_info": {"versioning": True, "type": bool},
         "clean": {"versioning": False, "type": bool},
         "debug_mode": {"versioning": True, "type": bool},
-        "disable_code_generation": {"versioning": True, "type": bool},
+        "disable_code_generation": {"versioning": False, "type": bool},
         "verbose": {"versioning": False, "type": bool},
     }
 
@@ -761,20 +761,23 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
             start_time = next_time
 
         # Build extension module
-        pyext_opts = dict(
-            verbose=self.builder.options.backend_opts.get("verbose", False),
-            clean=self.builder.options.backend_opts.get("clean", False),
-            **pyext_builder.get_gt_pyext_build_opts(
-                debug_mode=self.builder.options.backend_opts.get("debug_mode", False),
-                add_profile_info=self.builder.options.backend_opts.get("add_profile_info", False),
-                uses_cuda=uses_cuda,
-                gt_version=gt_version,
-            ),
-        )
-
-        module_name, file_path = self.build_extension_module(
-            gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda
-        )
+        if gt_pyext_sources:
+            pyext_opts = dict(
+                verbose=self.builder.options.backend_opts.get("verbose", False),
+                clean=self.builder.options.backend_opts.get("clean", False),
+                **pyext_builder.get_gt_pyext_build_opts(
+                    debug_mode=self.builder.options.backend_opts.get("debug_mode", False),
+                    add_profile_info=self.builder.options.backend_opts.get("add_profile_info", False),
+                    uses_cuda=uses_cuda,
+                    gt_version=gt_version,
+                ),
+            )
+            module_name, file_path = self.build_extension_module(
+                gt_pyext_sources, pyext_opts, uses_cuda=uses_cuda
+            )
+        else:
+            module_name = str(self.pyext_module_path)
+            file_path = ""
 
         if build_info is not None:
             build_info["build_time"] = time.perf_counter() - start_time

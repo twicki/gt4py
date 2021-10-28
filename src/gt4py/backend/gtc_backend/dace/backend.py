@@ -62,7 +62,7 @@ class GTCDaCeExtGenerator:
         sdfg.expand_library_nodes(recursive=True)
         sdfg.apply_strict_transformations(validate=True)
 
-        sources: Dict[str, str] = {}
+        sources: Dict[str, Dict[str, str]]
         if not self.backend.builder.options.backend_opts.get("disable_code_generation", False):
             implementation = DaCeComputationCodegen.apply(gtir, sdfg)
             bindings = DaCeBindingsCodegen.apply(
@@ -74,6 +74,9 @@ class GTCDaCeExtGenerator:
                 "computation": {"computation.hpp": implementation},
                 "bindings": {"bindings" + bindings_ext: bindings},
             }
+        else:
+            sources = {"computation": {}, "bindings": {}}
+
         return sources
 
 
