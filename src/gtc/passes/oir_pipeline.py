@@ -14,7 +14,8 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple, Type, Union
+from abc import ABC, abstractmethod
+from typing import Callable, Optional, Protocol, Sequence, Type, Union
 
 from eve.visitors import NodeVisitor
 from gtc import oir
@@ -28,7 +29,7 @@ from gtc.passes.oir_optimizations.caches import (
     PruneKCacheFills,
     PruneKCacheFlushes,
 )
-from gtc.passes.oir_optimizations.horizontal_execution_merging import GreedyMerging, OnTheFlyMerging
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 from gtc.passes.oir_optimizations.inlining import MaskInlining
 from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
 from gtc.passes.oir_optimizations.pruning import NoFieldAccessPruning
@@ -50,26 +51,34 @@ def hash_step(step: Callable) -> int:
     return hash(step)
 
 
-class OirPipeline:
+class OirPipeline(ABC):
+    @abstractmethod
+    def __hash__(self) -> int:
+        pass
+
+    @abstractmethod
+    def __repr__(self) -> str:
+        pass
+
+    @abstractmethod
+    def run(self, oir: oir.Stencil) -> oir.Stencil:
+        pass
+
+
+class DefaultPipeline(OirPipeline):
     """
     OIR passes pipeline runs passes in order and allows skipping.
 
     May only call existing passes and may not contain any pass logic itself.
     """
 
-    def __init__(
-        self, node: oir.Stencil, step_order: Optional[Union[Dict[str, int], Sequence[str]]] = None
-    ):
-        self.oir = node
-        self._cache: Dict[Tuple[int, ...], oir.Stencil] = {}
-        if isinstance(step_order, Sequence):
-            step_order = {step: index for index, step in enumerate(step_order)}
-        self._step_order = step_order
+    def __init__(self, *, skip: Optional[Sequence[PASS_T]] = None):
+        self.skip = skip or []
 
-    def default_steps(self) -> List[PASS_T]:
+    @staticmethod
+    def all_steps() -> Sequence[PASS_T]:
         return [
             graph_merge_horizontal_executions,
-            GreedyMerging,
             AdjacentLoopMerging,
             LocalTemporariesToScalars,
             WriteBeforeReadTemporariesToScalars,
@@ -84,49 +93,21 @@ class OirPipeline:
             FillFlushToLocalKCaches,
         ]
 
-    def _step_map(self) -> Dict[str, PASS_T]:
-        return {step.__name__: step for step in self.default_steps()}
-
+    @property
     def steps(self) -> Sequence[PASS_T]:
-        step_list = self.default_steps()
-        if self._step_order:
-            step_map = self._step_map()
-            for step_name in self._step_order:
-                if step_name in step_map:
-                    step = step_map[step_name]
-                    step_index = self._step_order[step_name]
-                    curr_index = step_list.index(step)
-                    step_list.remove(step)
-                    if step_index is not None:
-                        if step_index > curr_index:
-                            step_index -= 1
-                        step_list.insert(step_index, step)
-                else:
-                    raise RuntimeError(f"Unknown OIR step name: {step_name}")
-        return step_list
+        hash_skips = {hash_step(step) for step in self.skip}
+        return [step for step in self.all_steps() if hash_step(step) not in hash_skips]
 
-    def apply(self, steps: Sequence[PASS_T]) -> oir.Stencil:
-        result = self.oir
-        for step in steps:
+    def __hash__(self) -> int:
+        return hash(self.steps)
+
+    def __repr__(self) -> str:
+        return str([step.__name__ for step in self.steps])
+
+    def run(self, oir: oir.Stencil) -> oir.Stencil:
+        for step in self.steps:
             if isinstance(step, type) and issubclass(step, NodeVisitor):
-                result = step().visit(result)
+                oir = step().visit(oir)
             else:
-                result = step(result)
-        return result
-
-    def _get_cached(self, steps: Sequence[PASS_T]) -> Optional[oir.Stencil]:
-        return self._cache.get(tuple(hash_step(step) for step in steps))
-
-    def _set_cached(self, steps: Sequence[PASS_T], node: oir.Stencil) -> oir.Stencil:
-        return self._cache.setdefault(tuple(hash_step(step) for step in steps), node)
-
-    def _should_execute_step(self, step: PASS_T, skip: Sequence[PASS_T]) -> bool:
-        skip_hashes = [hash_step(skip_step) for skip_step in skip]
-        if hash_step(step) in skip_hashes:
-            return False
-        return True
-
-    def full(self, skip: Sequence[PASS_T] = None) -> oir.Stencil:
-        skip = skip or []
-        pipeline = [step for step in self.steps() if self._should_execute_step(step, skip)]
-        return self._get_cached(pipeline) or self._set_cached(pipeline, self.apply(pipeline))
+                oir = step(oir)
+        return oir

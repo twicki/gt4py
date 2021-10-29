@@ -45,7 +45,9 @@ from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
-from gtc.passes.oir_pipeline import OirPipeline
+from gtc.passes.oir_optimizations.inlining import MaskInlining
+from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
+from gtc.passes.oir_pipeline import DefaultPipeline
 
 
 if TYPE_CHECKING:
@@ -205,9 +207,13 @@ class GTCDaCeExtGenerator:
         self.backend = backend
 
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
+        default_pipeline = DefaultPipeline(
+            skip=[MaskStmtMerging, MaskInlining, FillFlushToLocalKCaches]
+        )
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
-        oir = OirPipeline(gtir_to_oir.GTIRToOIR().visit(gtir)).full(
-            skip=[FillFlushToLocalKCaches]
+        base_oir = gtir_to_oir.GTIRToOIR().visit(gtir)
+        oir = self.backend.builder.options.backend_opts.get("oir_pipeline", default_pipeline).run(
+            base_oir
         )
         sdfg = OirSDFGBuilder().visit(oir)
 

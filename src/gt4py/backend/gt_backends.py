@@ -30,6 +30,7 @@ from gt4py import gt_src_manager
 from gt4py import ir as gt_ir
 from gt4py import utils as gt_utils
 from gt4py.utils import text as gt_text
+from gtc.passes.oir_pipeline import OirPipeline
 
 from . import pyext_builder
 from .module_generator import CUDAPyExtModuleGenerator, PyExtModuleGenerator
@@ -729,7 +730,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         "clean": {"versioning": False, "type": bool},
         "debug_mode": {"versioning": True, "type": bool},
         "disable_code_generation": {"versioning": False, "type": bool},
-        "pass_order": {"versioning": True, "type": dict},
+        "oir_pipeline": {"versioning": True, "type": OirPipeline},
         "verbose": {"versioning": False, "type": bool},
     }
 
