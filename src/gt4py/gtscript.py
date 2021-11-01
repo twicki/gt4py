@@ -391,6 +391,15 @@ def as_sdfg(*args, **kwargs) -> dace.SDFG:
         from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
         from gtc.passes.oir_pipeline import DefaultPipeline
 
+        default_pipeline = DefaultPipeline(
+            skip=[
+                MaskStmtMerging,
+                MaskInlining,
+                FillFlushToLocalKCaches,
+            ]
+        )
+        oir_pipeline = kwargs.pop("oir_pipeline", default_pipeline)
+
         definition_ir = GTScriptFrontend.generate(
             definition_func,
             externals=kwargs,
@@ -399,24 +408,14 @@ def as_sdfg(*args, **kwargs) -> dace.SDFG:
                 module=inspect.currentframe().f_back.f_globals["__name__"],
             ),
         )
+
         gt_ir = DefIRToGTIR.apply(definition_ir)
         gt_ir = GtirPipeline(gt_ir).full()
-
-        default_pipeline = DefaultPipeline(
-            skip=[
-                MaskStmtMerging,
-                MaskInlining,
-                FillFlushToLocalKCaches,
-            ]
-        )
-        gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
-        base_oir = gtir_to_oir.GTIRToOIR().visit(gtir)
-        backend = gt4py.backend.from_name(kwargs.get("backend", "gtc:dace"))
-        oir = backend.builder.options.backend_opts.get("oir_pipeline", default_pipeline).run(
-            base_oir
-        )
+        base_oir = gtir_to_oir.GTIRToOIR().visit(gt_ir)
+        oir = oir_pipeline.run(base_oir)
 
         sdfg: dace.SDFG = OirSDFGBuilder().visit(oir)
+        backend = gt4py.backend.from_name(kwargs.get("backend", "gtc:dace"))
         to_device(sdfg, device=backend.storage_info["device"])
         sdfg = expand_and_wrap_sdfg(gt_ir, sdfg, layout_map=backend.storage_info["layout_map"])
 
