@@ -470,7 +470,8 @@ class SDFGWrapper:
     def __sdfg__(self, *args, **kwargs):
 
         if self.stencil_object is None:
-            self.stencil_object = stencil(
+            stencil_function = kwargs.pop("stencil_function", stencil)
+            self.stencil_object = stencil_function(
                 definition=self.func, backend="gtc:numpy", **self.stencil_kwargs
             )
 
