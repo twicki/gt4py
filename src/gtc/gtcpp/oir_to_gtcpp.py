@@ -158,11 +158,6 @@ class OIRToGTCpp(eve.NodeTranslator):
     ) -> gtcpp.VariableKOffset:
         return gtcpp.VariableKOffset(k=self.visit(node.k, **kwargs))
 
-    def visit_VariableOffset(
-        self, node: common.VariableOffset, **kwargs: Any
-    ) -> gtcpp.VariableOffset:
-        return gtcpp.VariableOffset(i=node.i, j=node.j, k=self.visit(node.k, **kwargs))
-
     def visit_FieldAccess(self, node: oir.FieldAccess, **kwargs: Any) -> gtcpp.AccessorRef:
         return gtcpp.AccessorRef(
             name=node.name,

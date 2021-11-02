@@ -41,10 +41,6 @@ class Offset(common.CartesianOffset):
     pass
 
 
-class VariableOffset(common.VariableOffset):
-    pass
-
-
 class Literal(common.Literal, Expr):  # type: ignore
     pass
 

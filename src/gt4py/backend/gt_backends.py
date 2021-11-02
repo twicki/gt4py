@@ -702,7 +702,6 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             stage_extents=stage_extents,
             stencil_unique_name=self.class_name,
             tmp_fields=tmp_fields,
-            positional_computation=positional_computation,
             requires_K_size=self.requires_K_size,
         )
 

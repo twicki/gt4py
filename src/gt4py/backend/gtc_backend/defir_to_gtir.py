@@ -163,7 +163,7 @@ class DefIRToGTIR(IRNodeVisitor):
         return gtir.Stencil(
             name=node.name,
             params=[
-                self.visit(f, all_params={**self._field_params, **self._scalar_params})
+                self.visit(f, all_params={**field_params, **scalar_params})
                 for f in node.api_signature
             ],
             vertical_loops=vertical_loops,
@@ -299,7 +299,6 @@ class DefIRToGTIR(IRNodeVisitor):
             name=node.name,
             offset=self.transform_offset(node.offset),
             data_index=data_index,
-            dtype=self._field_params[node.name].dtype if node.name in self._field_params else None,
         )
 
     def visit_If(self, node: If, **kwargs: Any) -> Union[gtir.FieldIfStmt, gtir.ScalarIfStmt]:

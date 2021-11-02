@@ -283,8 +283,8 @@ class NpirGen(TemplatedGenerator):
 
     NumericalOffset = FormatTemplate("{op}{delta}")
 
-    def visit_VariableOffset(self, node: npir.VariableOffset, **kwargs: Any) -> str:
-        return self.visit(node.value)
+    def visit_VariableKOffset(self, node: npir.VariableKOffset, **kwargs: Any) -> str:
+        return self.visit(node.value, **kwargs)
 
     def visit_AxisOffset(
         self,
