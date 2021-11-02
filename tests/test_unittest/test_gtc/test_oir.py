@@ -318,7 +318,7 @@ def test_loop_mask():
 
 
 def test_variable_offset_with_float_field():
-    with pytest.raises(ValueError, match=r"Variable k-offset must have an integer type"):
+    with pytest.raises(ValueError, match=r"Variable vertical index must be an integer"):
         VariableKOffsetFactory(
             k__name="offset_field",
             k__dtype=DataType.FLOAT32,

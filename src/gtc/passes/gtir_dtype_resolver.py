@@ -99,7 +99,7 @@ class _GTIRPropagateDtypeToAccess(NodeTranslator):
     def visit_VariableKOffset(
         self, node: gtir.VariableKOffset, *, symtable: Dict[str, Any], **kwargs: Any
     ) -> gtir.VariableKOffset:
-        return gtir.VariableKOffset(i=node.i, j=node.j, k=self.visit(node.k, symtable=symtable))
+        return gtir.VariableKOffset(k=self.visit(node.k, symtable=symtable, **kwargs))
 
     def visit_ScalarAccess(
         self, node: gtir.ScalarAccess, *, symtable: Dict[str, Any], **kwargs: Any
