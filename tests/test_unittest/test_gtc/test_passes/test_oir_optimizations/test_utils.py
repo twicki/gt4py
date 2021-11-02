@@ -72,8 +72,8 @@ def test_access_collector():
         GeneralAccess(field="tmp", offset=(0, 0, 0), is_write=False),
         GeneralAccess(field="bar", offset=(0, 0, 0), is_write=True),
         GeneralAccess(field="mask", offset=(-1, -1, 1), is_write=False),
-        GeneralAccess(field="tmp", offset=(0, 1, 0), is_write=False),
-        GeneralAccess(field="baz", offset=(0, 0, 0), is_write=True),
+        GeneralAccess(field="tmp", offset=(0, 1, 0), is_write=False, in_mask=True),
+        GeneralAccess(field="baz", offset=(0, 0, 0), is_write=True, in_mask=True),
     ]
 
     result = AccessCollector.apply(testee)
