@@ -159,8 +159,8 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                 conditions.append(
                     gt_ir.BinOpExpr(
                         op=gt_ir.BinaryOperator.EQ,
-                        lhs=gt_ir.AxisIndex(axis=axis),
-                        rhs=gt_ir.AxisOffset(
+                        lhs=gt_ir.AxisPosition(axis=axis),
+                        rhs=gt_ir.AxisIndex(
                             axis=axis, endpt=interval.start.level, offset=interval.start.offset
                         ),
                     )
@@ -174,8 +174,8 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     conditions.append(
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.GE,
-                            lhs=gt_ir.AxisIndex(axis=axis),
-                            rhs=gt_ir.AxisOffset(
+                            lhs=gt_ir.AxisPosition(axis=axis),
+                            rhs=gt_ir.AxisIndex(
                                 axis=axis, endpt=interval.start.level, offset=interval.start.offset
                             ),
                         )
@@ -186,8 +186,8 @@ class LowerHorizontalIfPass(gt_ir.IRNodeMapper):
                     conditions.append(
                         gt_ir.BinOpExpr(
                             op=gt_ir.BinaryOperator.LT,
-                            lhs=gt_ir.AxisIndex(axis=axis),
-                            rhs=gt_ir.AxisOffset(
+                            lhs=gt_ir.AxisPosition(axis=axis),
+                            rhs=gt_ir.AxisIndex(
                                 axis=axis, endpt=interval.end.level, offset=interval.end.offset
                             ),
                         )
@@ -537,10 +537,10 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
 
         return (start_splitter, start_offset), (end_splitter, end_offset)
 
-    def visit_AxisIndex(self, node: gt_ir.AxisIndex) -> str:
+    def visit_AxisPosition(self, node: gt_ir.AxisPosition) -> str:
         return f"eval.{node.axis.lower()}()"
 
-    def visit_AxisOffset(self, node: gt_ir.AxisOffset) -> str:
+    def visit_AxisIndex(self, node: gt_ir.AxisIndex) -> str:
         return "static_cast<gt::int_t>({endpt}{offset:+d})".format(
             endpt=f"eval(domain_size_{node.axis.upper()}())"
             if node.endpt == gt_ir.LevelMarker.END
@@ -589,17 +589,9 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
                     arg["extent"] = gt_utils.flatten(accessor.extent[:-1]) + [-1000, 1000]
             args.append(arg)
 
-        for for_node in gt_ir.iter_nodes_of_type(node, gt_ir.For):
-            if any(
-                isinstance(bound, gt_ir.AxisBound) and bound.level == gt_ir.LevelMarker.END
-                for bound in (for_node.start, for_node.stop)
-            ):
-                args.append({"name": "domain_size_K", "access_type": "in", "extent": None})
-                self.requires_K_size = True
-
         parallel_axes_names = [axis.name for axis in self.domain.parallel_axes]
         has_horizontal_region = False
-        for pos_node in gt_ir.iter_nodes_of_type(node, gt_ir.AxisIndex):
+        for pos_node in gt_ir.iter_nodes_of_type(node, gt_ir.AxisPosition):
             if pos_node.axis in parallel_axes_names:
                 has_horizontal_region = True
 
@@ -675,7 +667,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             if name not in node.unreferenced
         ]
 
-        positional_computation = len(tuple(gt_ir.iter_nodes_of_type(node, gt_ir.AxisIndex))) > 0
+        positional_computation = len(tuple(gt_ir.iter_nodes_of_type(node, gt_ir.AxisPosition))) > 0
         stage_extents = {}
         stage_functors = {}
         for multi_stage in node.multi_stages:
@@ -703,6 +695,7 @@ class GTPyExtGenerator(gt_ir.IRNodeVisitor):
             halo_sizes=halo_sizes,
             k_axis=k_axis,
             module_name=self.module_name,
+            positional_computation=positional_computation,
             multi_stages=multi_stages,
             parameters=parameters,
             stage_functors=stage_functors,
@@ -732,6 +725,7 @@ class BaseGTBackend(gt_backend.BasePyExtBackend, gt_backend.CLIBackendMixin):
         "disable_code_generation": {"versioning": False, "type": bool},
         "oir_pipeline": {"versioning": True, "type": OirPipeline},
         "verbose": {"versioning": False, "type": bool},
+        "oir_pipeline": {"versioning": True, "type": OirPipeline},
     }
 
     GT_BACKEND_T: str

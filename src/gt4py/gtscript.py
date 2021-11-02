@@ -34,7 +34,6 @@ import numpy as np
 
 import gt4py.backend
 from gt4py import definitions as gt_definitions
-from gt4py import utils as gt_utils
 from gt4py.lazy_stencil import LazyStencil
 from gt4py.stencil_builder import StencilBuilder
 from gt4py.utils import shash

@@ -17,8 +17,6 @@
 """Main module of the analysis pipeline.
 """
 
-import pprint
-
 from gt4py import ir as gt_ir
 from gt4py.analysis import TransformData
 

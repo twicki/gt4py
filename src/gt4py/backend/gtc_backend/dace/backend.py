@@ -207,18 +207,13 @@ class GTCDaCeExtGenerator:
         self.backend = backend
 
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
-        default_pipeline = DefaultPipeline(
-            skip=[
-                MaskStmtMerging,
-                MaskInlining,
-                FillFlushToLocalKCaches,
-            ]
-        )
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         base_oir = gtir_to_oir.GTIRToOIR().visit(gtir)
-        oir = self.backend.builder.options.backend_opts.get("oir_pipeline", default_pipeline).run(
-            base_oir
+        oir_pipeline = self.backend.builder.options.backend_opts.get(
+            "oir_pipeline",
+            DefaultPipeline(skip=[MaskStmtMerging, MaskInlining, FillFlushToLocalKCaches]),
         )
+        oir = oir_pipeline.run(base_oir)
         sdfg = OirSDFGBuilder().visit(oir)
 
         to_device(sdfg, self.backend.storage_info["device"])

@@ -54,20 +54,26 @@ ORIGIN_CORRECTED_VIEW_CLASS = textwrap.dedent(
             if not isinstance(key, tuple):
                 key = (key, )
             for dim, idx in enumerate(key):
-                if self.offsets[dim] == 0:
-                    new_args.append(idx)
-                elif isinstance(idx, slice):
-                    start = 0 if idx.start is None else idx.start
-                    stop = -1 if idx.stop is None else idx.stop
+                offset = self.offsets[dim]
+                if isinstance(idx, slice):
+                    if idx.start is None or idx.stop is None:
+                        assert offset == 0
                     new_args.append(
-                        slice(start + self.offsets[dim], stop + self.offsets[dim], idx.step)
+                        slice(idx.start + offset, idx.stop + offset, idx.step) if offset else idx
                     )
                 else:
-                    new_args.append(idx + self.offsets[dim])
-            if isinstance(new_args[-1], np.ndarray):
-                new_args[0:2] = np.broadcast_arrays(
-                    np.arange(new_args[0].start, new_args[0].stop)[:, None, None],
-                    np.arange(new_args[1].start, new_args[1].stop)[None, :, None],
+                    new_args.append(idx + offset)
+            if not isinstance(new_args[2], (numbers.Integral, slice)):
+                assert isinstance(new_args[0], slice) and isinstance(new_args[1], slice)
+                new_args[:2] = np.broadcast_arrays(
+                    np.expand_dims(
+                        np.arange(new_args[0].start, new_args[0].stop),
+                        axis=tuple(i for i in range(self.field.ndim) if i != 0)
+                    ),
+                    np.expand_dims(
+                        np.arange(new_args[1].start, new_args[1].stop),
+                        axis=tuple(i for i in range(self.field.ndim) if i != 1)
+                    ),
                 )
             return tuple(new_args)
 
@@ -188,12 +194,24 @@ class ExtentCalculator(NodeVisitor):
             )
 
 
+VARIABLE_OFFSET_FUNCTION = textwrap.dedent(
+    """
+    def var_k_expr(expr, k):
+
+        k_indices = np.arange(expr.shape[2]) + k
+        all_nonk_axes = tuple(i for i in range(expr.ndim) if i != 2)
+        expanded_k_indices = np.expand_dims(k_indices, axis=all_nonk_axes)
+        return expanded_k_indices + expr
+    """
+)
+
+
 def slice_to_extent(acc: npir.FieldSlice) -> Extent:
     return Extent(
         (
-            [acc.i_offset.offset.value] * 2 if acc.i_offset else (0, 0),
-            [acc.j_offset.offset.value] * 2 if acc.j_offset else (0, 0),
-            [acc.k_offset.offset.value] * 2 if acc.k_offset else (0, 0),
+            [acc.i_offset.offset.value] * 2 if acc.i_offset else [0, 0],
+            [acc.j_offset.offset.value] * 2 if acc.j_offset else [0, 0],
+            [0, 0],
         )
     )
 
@@ -304,6 +322,17 @@ class NpirGen(TemplatedGenerator):
         "{name} = np.reshape({name}, ({shape}))\n_origin_['{name}'] = [{origin}]"
     )
 
+    def visit_VariableKOffset(
+        self, node: npir.VariableKOffset, **kwargs: Any
+    ) -> Union[str, Collection[str]]:
+        return self.generic_visit(
+            node,
+            counter="k_" if kwargs["is_serial"] else "k",
+            var_offset=self.visit(node.k, **kwargs),
+        )
+
+    VariableKOffset = FormatTemplate("var_k_expr({var_offset}, {counter})")
+
     def visit_FieldSlice(
         self,
         node: npir.FieldSlice,
@@ -319,8 +348,7 @@ class NpirGen(TemplatedGenerator):
         domain = list(horiz_rest) + [None] if horiz_rest else [None] * 3
 
         offset_str = ", ".join(
-            self.visit(off, bounds=bounds, **kwargs) if off else ":"
-            for off, bounds in zip(offset, domain)
+            self.visit(off, is_serial=is_serial, **kwargs) if off else ":" for off in offset
         )
 
         if node.data_index:
@@ -332,9 +360,7 @@ class NpirGen(TemplatedGenerator):
         else:
             arr_expr = f"{node.name}_[{offset_str}]"
 
-        return self.generic_visit(node, arr_expr=arr_expr, mask_acc=mask_acc, **kwargs)
-
-    FieldSlice = FormatTemplate("{arr_expr}{mask_acc}")
+        return f"{arr_expr}{mask_acc}"
 
     def visit_EmptyTemp(
         self, node: npir.EmptyTemp, *, temp_name: str, **kwargs
@@ -487,6 +513,7 @@ class NpirGen(TemplatedGenerator):
             node,
             signature=", ".join(signature),
             data_view_class=ORIGIN_CORRECTED_VIEW_CLASS,
+            var_offset_func=VARIABLE_OFFSET_FUNCTION,
             field_extents=field_extents,
             block_extents=block_extents,
             **kwargs,
@@ -496,7 +523,7 @@ class NpirGen(TemplatedGenerator):
         textwrap.dedent(
             """\
             import numpy as np
-
+            import numbers
 
             def run({{ signature }}):
 
@@ -515,6 +542,8 @@ class NpirGen(TemplatedGenerator):
                 {% for pass in vertical_passes %}
                 {{ pass | indent(4) }}
                 {% endfor %}
+
+            {{ var_offset_func }}
             """
         )
     )

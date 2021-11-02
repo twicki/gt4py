@@ -313,19 +313,23 @@ class BaseBackend(Backend):
 
         return module
 
-    def make_module_source(self, *, args_data: Optional[ModuleData] = None, **kwargs: Any) -> str:
-        """Generate the module source code with or without stencil id."""
-        args_data = args_data or self.make_args_data(**kwargs)
-        source = self.MODULE_GENERATOR_CLASS()(args_data, self.builder, **kwargs)
-        return source
-
-    def make_args_data(self, **kwargs: Any) -> ModuleData:
+    def make_args_data(self) -> ModuleData:
         """Generate the fields & parameters description, save none."""
         if self.USE_LEGACY_TOOLCHAIN:
             args_data = make_args_data_from_iir(self.builder.implementation_ir)
         else:
             args_data = make_args_data_from_gtir(self.builder.gtir_pipeline)
         return args_data
+
+    def make_module_source(self, *, args_data: Optional[ModuleData] = None, **kwargs: Any) -> str:
+        """Generate the module source code with or without stencil id."""
+        args_data = args_data or self.make_args_data()
+        source = self.MODULE_GENERATOR_CLASS()(args_data, self.builder, **kwargs)
+        return source
+
+    @property
+    def file_name(self) -> str:
+        return str(self.builder.module_path)
 
 
 class PurePythonBackendCLIMixin(CLIBackendMixin):

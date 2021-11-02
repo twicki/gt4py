@@ -226,9 +226,7 @@ class NumPySourceGenerator(PythonSourceGenerator):
         intervals = kwargs.get("intervals", None)
         assert node.name in self.block_info.accessors
 
-        is_parallel = not self.block_info.explicit_K_loop
-        extent = self.block_info.extent
-
+        is_parallel = self.block_info.iteration_order == gt_ir.IterationOrder.PARALLEL
         parallel_axes_names = [
             axis
             for axis in self.impl_node.fields[node.name].axes
@@ -359,7 +357,6 @@ class NumPySourceGenerator(PythonSourceGenerator):
         return str(node.value)
 
     def visit_UnaryOpExpr(self, node: gt_ir.UnaryOpExpr, **kwargs) -> str:
-
         if node.op is gt_ir.UnaryOperator.NOT:
             source = "np.logical_not({expr})".format(expr=self.visit(node.arg, **kwargs))
         else:

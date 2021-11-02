@@ -84,6 +84,10 @@ class AxisOffset(eve.Node):
         )
 
 
+class VariableKOffset(common.VariableKOffset[Expr]):
+    pass
+
+
 @eve.utils.noninstantiable
 class VectorExpression(Expr):
     kind = cast(common.ExprKind, common.ExprKind.FIELD)
@@ -114,7 +118,7 @@ class FieldSlice(VectorExpression, VectorLValue):
     name: str
     i_offset: Optional[AxisOffset] = None
     j_offset: Optional[AxisOffset] = None
-    k_offset: Optional[AxisOffset] = None
+    k_offset: Optional[Union[AxisOffset, VariableKOffset]] = None
     data_index: List[Expr] = []
 
 

@@ -153,10 +153,10 @@ class OIRToGTCpp(eve.NodeTranslator):
     def visit_Temporary(self, node: oir.Temporary, **kwargs: Any) -> gtcpp.Temporary:
         return gtcpp.Temporary(name=node.name, dtype=node.dtype)
 
-    def visit_CartesianOffset(
-        self, node: common.CartesianOffset, **kwargs: Any
-    ) -> common.CartesianOffset:
-        return node
+    def visit_VariableKOffset(
+        self, node: oir.VariableKOffset, **kwargs: Any
+    ) -> gtcpp.VariableKOffset:
+        return gtcpp.VariableKOffset(k=self.visit(node.k, **kwargs))
 
     def visit_VariableOffset(
         self, node: common.VariableOffset, **kwargs: Any
