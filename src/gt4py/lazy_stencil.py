@@ -6,7 +6,7 @@ from cached_property import cached_property
 
 
 if TYPE_CHECKING:
-    from gt4py.backend.base import Backend
+    from gt4py.backend.base import Backend, ModuleData
     from gt4py.stencil_builder import StencilBuilder
     from gt4py.stencil_object import StencilObject
 
@@ -38,6 +38,15 @@ class LazyStencil:
         impl = self.builder.build()()
         return impl
 
+    @cached_property
+    def arg_data(self) -> "ModuleData":
+        """
+        Generate the args data from the backend.
+
+        Does not triggers a build.
+        """
+        return self.backend.make_args_data()
+
     @property
     def backend(self) -> "Backend":
         """Do not trigger a build."""
@@ -46,11 +55,20 @@ class LazyStencil:
     @property
     def field_info(self) -> Dict[str, Any]:
         """
-        Access the compiled stencil object's `field_info` attribute.
+        Access the stencil object's `field_info` attribute.
 
-        Triggers a build if necessary.
+        Does not triggers a build.
         """
-        return self.implementation.field_info
+        return self.arg_data.field_info
+
+    @property
+    def parameter_info(self) -> Dict[str, Any]:
+        """
+        Access the stencil object's `parameter_info` attribute.
+
+        Does not triggers a build.
+        """
+        return self.arg_data.parameter_info
 
     def check_syntax(self) -> None:
         """Create the gtscript IR for the stencil, failing on syntax errors."""
