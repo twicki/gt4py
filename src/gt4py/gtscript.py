@@ -475,7 +475,7 @@ class SDFGWrapper:
                 definition=self.func, backend="gtc:numpy", **self.stencil_kwargs
             )
 
-            basename = os.path.splitext(self.stencil_object.file_name())[0]
+            basename = os.path.splitext(self.stencil_object.file_name)[0]
             self.filename = (
                 basename + "_wrapper_" + str(shash(self.device, self.origin, self.domain)) + ".sdfg"
             )
@@ -488,7 +488,7 @@ class SDFGWrapper:
             return copy.deepcopy(self._sdfg)
 
         # check if same sdfg already cached on disk
-        if kwargs["use_disk_sdfg"]:
+        if kwargs.get("use_disk_sdfg", False):
             try:
                 self._sdfg = dace.SDFG.from_file(self.filename)
                 print("reused (__sdfg__):", self.filename)
@@ -652,7 +652,7 @@ class SDFGWrapper:
             if not re.match(f"__.*_._stride", arg) and not re.match(f"__.*_._size", arg)
         ]
         assert len(self._sdfg.arg_names) == len(true_args)
-        if kwargs["use_disk_sdfg"]:
+        if kwargs.get("use_disk_sdfg", False):
             self._sdfg.save(self.filename)
             print("saved (__sdfg__):", self.filename)
         SDFGWrapper.loaded_compiled_sdfgs[self.filename] = self._sdfg
