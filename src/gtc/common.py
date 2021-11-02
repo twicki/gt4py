@@ -367,6 +367,8 @@ class IJExtent(LocNode):
 
 
 class VariableKOffset(GenericNode, Generic[ExprT]):
+    i: int = 0
+    j: int = 0
     k: ExprT
 
     def to_dict(self) -> Dict[str, Optional[int]]:
