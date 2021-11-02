@@ -461,7 +461,7 @@ class SDFGWrapper:
                 definition=self.func, backend="gtc:numpy", **self.stencil_kwargs
             )
 
-            basename = os.path.splitext(self.stencil_object._file_name)[0]
+            basename = os.path.splitext(self.stencil_object.file_name)[0]
             self.filename = (
                 basename + "_wrapper_" + str(shash(self.device, self.origin, self.domain)) + ".sdfg"
             )
@@ -474,15 +474,16 @@ class SDFGWrapper:
             return copy.deepcopy(self._sdfg)
 
         # check if same sdfg already cached on disk
-        try:
-            self._sdfg = dace.SDFG.from_file(self.filename)
-            print("reused (__sdfg__):", self.filename)
-            SDFGWrapper.loaded_compiled_sdfgs[self.filename] = self._sdfg
-            return copy.deepcopy(self._sdfg)
-        except FileNotFoundError:
-            pass
-        except Exception:
-            raise
+        if kwargs.get("use_disk_sdfg", False):
+            try:
+                self._sdfg = dace.SDFG.from_file(self.filename)
+                print("reused (__sdfg__):", self.filename)
+                SDFGWrapper.loaded_compiled_sdfgs[self.filename] = self._sdfg
+                return copy.deepcopy(self._sdfg)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                raise
 
         # otherwise, wrap and save sdfg from scratch
         inner_sdfg = as_sdfg(backend=self.backend, **(self.stencil_kwargs.get("externals", {})))(
@@ -571,25 +572,25 @@ class SDFGWrapper:
             if sdfg.parent_nsdfg_node is not None:
                 symmap = sdfg.parent_nsdfg_node.symbol_mapping
 
-                if '__I' in symmap:
-                    ival = symmap['__I']
-                    del symmap['__I']
-                if '__J' in symmap:
-                    jval = symmap['__J']
-                    del symmap['__J']
-                if '__K' in symmap:
-                    kval = symmap['__K']
-                    del symmap['__K']
+                if "__I" in symmap:
+                    ival = symmap["__I"]
+                    del symmap["__I"]
+                if "__J" in symmap:
+                    jval = symmap["__J"]
+                    del symmap["__J"]
+                if "__K" in symmap:
+                    kval = symmap["__K"]
+                    del symmap["__K"]
 
-            sdfg.replace('__I', ival)
-            if '__I' in sdfg.symbols:
-                sdfg.remove_symbol('__I')
-            sdfg.replace('__J', jval)
-            if '__J' in sdfg.symbols:
-                sdfg.remove_symbol('__J')
-            sdfg.replace('__K', kval)
-            if '__K' in sdfg.symbols:
-                sdfg.remove_symbol('__K')
+            sdfg.replace("__I", ival)
+            if "__I" in sdfg.symbols:
+                sdfg.remove_symbol("__I")
+            sdfg.replace("__J", jval)
+            if "__J" in sdfg.symbols:
+                sdfg.remove_symbol("__J")
+            sdfg.replace("__K", kval)
+            if "__K" in sdfg.symbols:
+                sdfg.remove_symbol("__K")
 
             for val in ival, jval, kval:
                 sym = dace.symbolic.pystr_to_symbolic(val)
@@ -637,9 +638,10 @@ class SDFGWrapper:
             if not re.match(f"__.*_._stride", arg) and not re.match(f"__.*_._size", arg)
         ]
         assert len(self._sdfg.arg_names) == len(true_args)
-        self._sdfg.save(self.filename)
+        if kwargs.get("use_disk_sdfg", False):
+            self._sdfg.save(self.filename)
+            print("saved (__sdfg__):", self.filename)
         SDFGWrapper.loaded_compiled_sdfgs[self.filename] = self._sdfg
-        print("saved (__sdfg__):", self.filename)
         self._sdfg.validate()
         return dace.SDFG.from_json(self._sdfg.to_json())
 
