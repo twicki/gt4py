@@ -36,7 +36,6 @@ import numpy as np
 
 import gt4py.backend
 from gt4py import definitions as gt_definitions
-from gt4py import utils as gt_utils
 from gt4py.lazy_stencil import LazyStencil
 from gt4py.stencil_builder import StencilBuilder
 from gt4py.utils import shash
@@ -171,7 +170,15 @@ def stencil(
 
         build_info : `dict`, optional
             Dictionary used to store information about the stencil generation.
-            (`None` by default).
+            (`None` by default). Possible key-value pairs include:
+            - 'def_ir': (StencilDefinition) Definition IR object
+            - 'iir': (StencilImplementation) Implementation IR object
+            - 'symbol_info': (Dict[str, SymbolInfo]) Dictionary of SymbolInfo objects
+            - 'parse_time': (float) Frontend run time, e.g., parsing GTScript in seconds
+            - 'module_time': (float) Python module generation time in seconds
+            - 'codegen_time'" (float) Backend-specific code generation time in seconds
+            - 'build_time': (float) Compilation time, i.e., for non-Python backends in seconds
+            - 'load_time': (float) Module load time for cached stencils in seconds
 
         dtypes: `dict`[`str`, dtype_definition], optional
             Specify dtypes for string keys in the argument annotations.
@@ -245,6 +252,11 @@ def stencil(
             _impl_opts[key] = value
     for key in _impl_opts:
         kwargs.pop(key)
+
+    # Setup build_info timings
+    if build_info is not None:
+        time_keys = ("parse_time", "module_time", "codegen_time", "build_time", "load_time")
+        build_info.update({time_key: 0.0 for time_key in time_keys})
 
     build_options = gt_definitions.BuildOptions(
         name=name,
@@ -571,25 +583,25 @@ class SDFGWrapper:
             if sdfg.parent_nsdfg_node is not None:
                 symmap = sdfg.parent_nsdfg_node.symbol_mapping
 
-                if '__I' in symmap:
-                    ival = symmap['__I']
-                    del symmap['__I']
-                if '__J' in symmap:
-                    jval = symmap['__J']
-                    del symmap['__J']
-                if '__K' in symmap:
-                    kval = symmap['__K']
-                    del symmap['__K']
+                if "__I" in symmap:
+                    ival = symmap["__I"]
+                    del symmap["__I"]
+                if "__J" in symmap:
+                    jval = symmap["__J"]
+                    del symmap["__J"]
+                if "__K" in symmap:
+                    kval = symmap["__K"]
+                    del symmap["__K"]
 
-            sdfg.replace('__I', ival)
-            if '__I' in sdfg.symbols:
-                sdfg.remove_symbol('__I')
-            sdfg.replace('__J', jval)
-            if '__J' in sdfg.symbols:
-                sdfg.remove_symbol('__J')
-            sdfg.replace('__K', kval)
-            if '__K' in sdfg.symbols:
-                sdfg.remove_symbol('__K')
+            sdfg.replace("__I", ival)
+            if "__I" in sdfg.symbols:
+                sdfg.remove_symbol("__I")
+            sdfg.replace("__J", jval)
+            if "__J" in sdfg.symbols:
+                sdfg.remove_symbol("__J")
+            sdfg.replace("__K", kval)
+            if "__K" in sdfg.symbols:
+                sdfg.remove_symbol("__K")
 
             for val in ival, jval, kval:
                 sym = dace.symbolic.pystr_to_symbolic(val)

@@ -1,4 +1,19 @@
 # -*- coding: utf-8 -*-
+#
+# GT4Py - GridTools4Py - GridTools for Python
+#
+# Copyright (c) 2014-2021, ETH Zurich
+# All rights reserved.
+#
+# This file is part the GT4Py project and the GridTools framework.
+# GT4Py is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the
+# Free Software Foundation, either version 3 of the License, or any later
+# version. See the LICENSE.txt file at the top-level directory of this
+# distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import pathlib
 from typing import TYPE_CHECKING, Any, Dict, Optional, Type, Union
 
@@ -47,7 +62,7 @@ class StencilBuilder:
         self,
         definition_func: Union[StencilFunc, AnnotatedStencilFunc],
         *,
-        backend: Optional[Type["BackendType"]] = None,
+        backend: Optional[Union[str, Type["BackendType"]]] = None,
         options: Optional[BuildOptions] = None,
         frontend: Optional["FrontendType"] = None,
     ):
@@ -56,9 +71,9 @@ class StencilBuilder:
         self.options = options or BuildOptions(  # type: ignore
             **self.default_options_dict(definition_func)
         )
-        self.backend: "BackendType" = (
-            backend(self) if backend else gt4py.backend.from_name("debug")(self)
-        )
+        backend = backend or "debug"
+        backend = gt4py.backend.from_name(backend) if isinstance(backend, str) else backend
+        self.backend: "BackendType" = backend(self)
         self.frontend: "FrontendType" = frontend or gt4py.frontend.from_name("gtscript")
         self.caching = gt4py.caching.strategy_factory("jit", self)
         self._build_data: Dict[str, Any] = {}

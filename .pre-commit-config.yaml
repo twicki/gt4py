@@ -113,9 +113,7 @@ repos:
       docs/gtc/conf.py |
       src/gt4py/__gtscript__.py |
       src/gt4py/__init__.py |
-      src/gt4py/definitions.py |
       src/gt4py/gtscript.py |
-      src/gt4py/stencil_object.py |
       src/gt4py/analysis/__init__.py |
       src/gt4py/analysis/infos.py |
       src/gt4py/analysis/passes.py |
@@ -176,13 +174,13 @@ repos:
       src/gt4py/analysis/passes.py |
       src/gt4py/analysis/transformer.py |
       src/gt4py/backend/debug_backend.py |
+      src/gt4py/backend/gt_backends.py |
       src/gt4py/backend/numpy_backend.py |
       src/gt4py/backend/pyext_builder.py |
       src/gt4py/backend/python_generator.py |
       src/gt4py/frontend/gtscript_frontend.py |
       src/gt4py/ir/nodes.py |
       src/gt4py/ir/utils.py |
-      src/gt4py/stencil_object.py |
       src/gt4py/utils/meta.py |
       src/gtc_unstructured/irs/nir_to_usid.py |
       src/gtc_unstructured/irs/nir_passes/merge_neighbor_loops.py |
