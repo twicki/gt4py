@@ -126,7 +126,7 @@ class BaseOirSDFGBuilder(ABC):
                     res._ordered_accesses.extend(collection._ordered_accesses)
             return res
         elif isinstance(node, list):
-            res = AccessCollector.Result([])
+            res = AccessCollector.GeneralAccessCollection([])
             for n in node:
                 if isinstance(n, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
                     collection = self._get_access_collection(n)
