@@ -90,13 +90,13 @@ def test_optional_arg_noprovide():
     assert np.sum(outp, axis=(0, 1, 2)) == 90 * 7.0
 
 
-@pytest.mark.xfail(reason="Optional arguments can't be keyword arguments in dace parsing.")
+# @pytest.mark.xfail(reason="Optional arguments can't be keyword arguments in dace parsing.")
 def test_optional_arg_provide():
     @gtscript.stencil(backend="gtc:dace")
     def stencil(
         inp: gtscript.Field[np.float64],
-        outp: gtscript.Field[np.float64],
         unused_field: gtscript.Field[np.float64],
+        outp: gtscript.Field[np.float64],
         unused_par: float,
     ):
         with computation(PARALLEL), interval(...):
@@ -112,7 +112,7 @@ def test_optional_arg_provide():
 
     @dace.program
     def call_frozen_stencil():
-        frozen_stencil(inp=inp, outp=outp, unused_field=unused_field, unused_parameter=7.0)
+        frozen_stencil(inp, unused_field, outp, 7.0)
 
     call_frozen_stencil()
 

@@ -217,7 +217,8 @@ class FrozenStencil(SDFGConvertible):
             for arg in wrapper_sdfg.signature_arglist(with_types=False)
             if not re.match("__.*_._stride", arg) and not re.match("__.*_._size", arg)
         ]
-        wrapper_sdfg.arg_names = self.__sdfg_signature__()[0]
+        signature = self.__sdfg_signature__()
+        wrapper_sdfg.arg_names = [a for a in signature[0] if a not in signature[1]]
         assert len(wrapper_sdfg.arg_names) == len(true_args)
 
         return wrapper_sdfg
@@ -229,7 +230,7 @@ class FrozenStencil(SDFGConvertible):
                 f' (found "{self.stencil_object.backend}")'
             )
 
-    def __sdfg__(self, **kwargs):
+    def __sdfg__(self, *args, **kwargs):
         self._assert_dace_backend()
         frozen_hash = shash(type(self.stencil_object)._gt_id_, self.origin, self.domain)
 
@@ -242,7 +243,6 @@ class FrozenStencil(SDFGConvertible):
         filename = basename + "_" + str(frozen_hash) + ".sdfg"
         try:
             _loaded_sdfgs[frozen_hash] = dace.SDFG.from_file(filename)
-            print("reused (__sdfg__):", filename)
             return copy.deepcopy(_loaded_sdfgs[frozen_hash])
         except FileNotFoundError:
             pass
@@ -252,7 +252,6 @@ class FrozenStencil(SDFGConvertible):
 
         _loaded_sdfgs[frozen_hash] = self._sdfg_freeze_domain_and_origin(inner_sdfg)
         _loaded_sdfgs[frozen_hash].save(filename)
-        print("saved (__sdfg__):", filename)
 
         return copy.deepcopy(_loaded_sdfgs[frozen_hash])
 
@@ -261,22 +260,25 @@ class FrozenStencil(SDFGConvertible):
 
         special_args = {"self", "domain", "origin", "validate_args", "exec_info"}
         args = []
-        for arg in inspect.getfullargspec(self.stencil_object.__call__).args:
+        consts = []
+        for arg in (
+            inspect.getfullargspec(self.stencil_object.__call__).args
+            + inspect.getfullargspec(self.stencil_object.__call__).kwonlyargs
+        ):
             if arg in special_args:
                 continue
             if (
                 arg in self.stencil_object.field_info
                 and self.stencil_object.field_info[arg] is None
             ):
-                continue
+                consts.append(arg)
             if (
                 arg in self.stencil_object.parameter_info
                 and self.stencil_object.parameter_info[arg] is None
             ):
-                continue
-            else:
-                args.append(arg)
-        return (args, [])
+                consts.append(arg)
+            args.append(arg)
+        return (args, consts)
 
     def __sdfg_closure__(self, *args, **kwargs):
         self._assert_dace_backend()
