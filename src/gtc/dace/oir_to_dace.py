@@ -135,7 +135,7 @@ class BaseOirSDFGBuilder(ABC):
         elif isinstance(node, HorizontalExecutionLibraryNode):
             if id(node.oir_node) not in self._access_collection_cache:
                 self._access_collection_cache[id(node.oir_node)] = AccessCollector.apply(
-                    node.oir_node
+                    node.oir_node, compensate_regions=True
                 )
             return self._access_collection_cache[id(node.oir_node)]
         else:

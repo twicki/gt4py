@@ -16,7 +16,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from eve import NodeVisitor
 from eve.concepts import TreeNode
@@ -30,6 +30,7 @@ class Access:
     offset: Tuple[int, int, int]
     is_write: bool
     in_mask: bool = False
+    region: Optional[oir.HorizontalMask] = None
 
     @property
     def is_read(self) -> bool:
@@ -58,6 +59,7 @@ class AccessCollector(NodeVisitor):
         accesses: List[Access],
         field_name: str,
         is_write: bool,
+        region: oir.HorizontalMask = None,
         **kwargs: Any,
     ) -> None:
         offsets = node.to_dict()
@@ -67,6 +69,7 @@ class AccessCollector(NodeVisitor):
                 offset=(offsets["i"], offsets["j"], offsets["k"]),
                 is_write=is_write,
                 in_mask=kwargs.get("in_mask", False),
+                region=region,
             )
         )
 
@@ -79,8 +82,11 @@ class AccessCollector(NodeVisitor):
         self.visit(node.left, is_write=True, **kwargs)
 
     def visit_MaskStmt(self, node: oir.MaskStmt, **kwargs: Any) -> None:
+
+        region = node.mask if isinstance(node.mask, oir.HorizontalMask) else None
+
         self.visit(node.mask, is_write=False, **kwargs)
-        self.visit(node.body, in_mask=True, **kwargs)
+        self.visit(node.body, in_mask=True, region=region, **kwargs)
 
     def visit_While(self, node: oir.While, **kwargs: Any) -> None:
         self.visit(node.cond, is_write=False, **kwargs)
@@ -104,9 +110,17 @@ class AccessCollector(NodeVisitor):
             """Get a dictonary, mapping read fields' names to sets of offset tuples."""
             return self._offset_dict(xiter(self._ordered_accesses).filter(lambda x: x.is_read))
 
+        def read_accesses(self) -> List[Access]:
+            """Get the sub-list of read accesses"""
+            return list(xiter(self._ordered_accesses).filter(lambda x: x.is_read))
+
         def write_offsets(self) -> Dict[str, Set[Tuple[int, int, int]]]:
             """Get a dictonary, mapping written fields' names to sets of offset tuples."""
             return self._offset_dict(xiter(self._ordered_accesses).filter(lambda x: x.is_write))
+
+        def write_accesses(self) -> List[Access]:
+            """Get the sub-list of write accesses"""
+            return list(xiter(self._ordered_accesses).filter(lambda x: x.is_write))
 
         def fields(self) -> Set[str]:
             """Get a set of all accessed fields' names."""
@@ -129,9 +143,52 @@ class AccessCollector(NodeVisitor):
             return self._ordered_accesses
 
     @classmethod
-    def apply(cls, node: TreeNode, **kwargs: Any) -> "Result":
+    def _compensate_regions(cls, result: "AccessCollector.Result"):
+
+        res_accesses = []
+        for acc in result._ordered_accesses:
+            if acc.region is not None:
+                res_offset = []
+                for off, bound in zip(acc.offset, (acc.region.i, acc.region.j)):
+                    bound = common.HorizontalInterval(start=bound.start, end=bound.end)
+                    if off > 0:
+                        if bound.end is None:
+                            pass
+                        elif bound.end.level == common.LevelMarker.END:
+                            off = off + bound.end.offset
+                        else:
+                            off = 0
+                    if off < 0:
+                        if bound.start is None:
+                            # bound.start = common.AxisBound.start()
+                            pass
+                        elif bound.start.level == common.LevelMarker.START:
+                            off = off + bound.start.offset
+                        else:
+                            off = 0
+                    res_offset.append(off)
+                res_offset.append(acc.offset[2])
+                res_accesses.append(
+                    Access(
+                        field=acc.field,
+                        offset=(res_offset[0], res_offset[1], res_offset[2]),
+                        is_write=acc.is_write,
+                        in_mask=acc.in_mask,
+                        region=acc.region,
+                    )
+                )
+            else:
+                res_accesses.append(acc)
+        return AccessCollector.Result(res_accesses)
+
+    @classmethod
+    def apply(cls, node: TreeNode, *, compensate_regions=False, **kwargs: Any) -> "Result":
         result = cls.Result([])
         cls().visit(node, accesses=result._ordered_accesses, **kwargs)
+
+        if compensate_regions:
+            return cls._compensate_regions(result)
+
         return result
 
 

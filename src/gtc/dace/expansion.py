@@ -239,10 +239,12 @@ class OIRLibraryNodeExpander:
                 )
             else:
                 self.context_subsets[name] = edge.data.subset
-        self.origins = self.get_origins()
+        self.origins = self.get_origins(compensate_regions=False)
+        self.compensated_origins = self.get_origins(compensate_regions=True)
+        # self.compensated_origins = self.get_origins(compensate_regions=False)
         self.fix_context_memlets = fix_context_memlets
 
-    def get_origins(self):
+    def get_origins(self, compensate_regions=False):
         raise NotImplementedError("Implement in subclass")
 
     def add_arrays(self):
@@ -325,7 +327,7 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
             if any(c.name == name and isinstance(c, oir.IJCache) for c in self.node.caches):
                 array.storage = self.node.ijcache_storage_type
 
-    def get_ij_origins(self):
+    def get_ij_origins(self, compensate_regions=False):
 
         origins: Dict[str, Tuple[int, int]] = {}
 
@@ -335,7 +337,7 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
                 for ln, _ in section.all_nodes_recursive()
                 if isinstance(ln, HorizontalExecutionLibraryNode)
             ):
-                access_collection = get_access_collection(he)
+                access_collection = get_access_collection(he, compensate_regions=compensate_regions)
 
                 for name, offsets in access_collection.offsets().items():
                     off: Tuple[int, int]
@@ -365,8 +367,8 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
                     k_origs[name] = k_orig
         return k_origs
 
-    def get_origins(self):
-        ij_origins = self.get_ij_origins()
+    def get_origins(self, compensate_regions=False):
+        ij_origins = self.get_ij_origins(compensate_regions=compensate_regions)
         k_origins = self.get_k_origins()
         return {name: (*ij_origins[name], k_origins[name]) for name in ij_origins.keys()}
 
@@ -381,7 +383,11 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
             for ln, _ in section.all_nodes_recursive()
             if isinstance(ln, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode))
         ):
-            access_collection: AccessCollector.Result = get_access_collection(he)
+            access_collection: AccessCollector.Result = get_access_collection(
+                he,
+                compensate_regions=True
+                # he, compensate_regions=False
+            )
 
             for name, offsets in access_collection.offsets().items():
                 off: Tuple[int, int, int]
@@ -399,9 +405,10 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
                         max(section_origins[name][1], origin[1]),
                     )
                     min_k_offsets[name] = min(min_k_offsets[name], off[2])
-        access_collection = get_access_collection(section)
+        access_collection = get_access_collection(section, compensate_regions=True)
+        # access_collection = get_access_collection(section, compensate_regions=False)
         for name, section_origin in section_origins.items():
-            vl_origin = self.origins[name]
+            vl_origin = self.compensated_origins[name]
             shape = section.arrays[name].shape
             dimensions = array_dimensions(section.arrays[name])
             subset_strs = []
@@ -556,22 +563,43 @@ class ParallelNaiveVerticalLoopExpander(NaiveVerticalLoopExpander):
 
 
 class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
-    def get_origins(self):
-        access_collection: AccessCollector.Result = get_access_collection(self.node)
+    def get_origins(self, compensate_regions=False):
+        access_collection: AccessCollector.Result = get_access_collection(
+            self.node, compensate_regions=False
+        )
 
         origins = dict()
-        for name, offsets in access_collection.offsets().items():
-            origins[name] = access_collection.offsets()[name].pop()
-            for off in offsets:
-                origins[name] = (
-                    min(origins[name][0], off[0]),
-                    min(origins[name][1], off[1]),
-                    min(origins[name][2], off[2]),
-                )
+        for acc in access_collection.ordered_accesses():
+            if acc.region is not None:
+                offset = []
+                for dim, interval in enumerate((acc.region.i, acc.region.j)):
+                    if interval.start is None:
+                        offset.append(acc.offset[dim])
+                    elif interval.start.level == common.LevelMarker.START:
+                        if acc.offset[dim] > 0:
+                            offset.append(acc.offset[dim])
+                        else:
+                            offset.append(min(acc.offset[dim] + interval.start.offset, 0))
+                    else:
+                        # if acc.offset[dim] < 0:
+                        offset.append(0)
+                        # offset.append(min(acc.offset[dim], 0))
+                offset.append(acc.offset[2])
+            else:
+                offset = acc.offset
+
+            origins.setdefault(acc.field, offset)
+            origins[acc.field] = (
+                min(origins[acc.field][0], offset[0]),
+                min(origins[acc.field][1], offset[1]),
+                min(origins[acc.field][2], offset[2]),
+            )
+
+        for name, origin in origins.items():
             origins[name] = (
-                -origins[name][0] - self.node.iteration_space.i_interval.start.offset,
-                -origins[name][1] - self.node.iteration_space.j_interval.start.offset,
-                -origins[name][2],
+                -origin[0] - self.node.iteration_space.i_interval.start.offset,
+                -origin[1] - self.node.iteration_space.j_interval.start.offset,
+                -origin[2],
             )
         return origins
 
@@ -584,22 +612,36 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             dimensions = array_dimensions(self.parent_sdfg.arrays[name])
             data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
 
-            for off in offsets:
-                subset_strs = [
-                    f"{var}{self.origins[name][dim] + off[dim]:+d}"
-                    for dim, var in enumerate("ij0")
-                    if dimensions[dim]
-                ]
+            for offset in offsets:
+                subset_strs = []
+                for dim, var in enumerate("ij0"):
+                    if not dimensions[dim]:
+                        continue
+                    if offset[dim] < 0:
+                        origin = self.compensated_origins[name]
+                    else:
+                        origin = self.compensated_origins[name]
+                    off = origin[dim] + offset[dim]
+                    subset_strs.append(f"{var}{off:+d}")
                 subset_strs.extend(f"0:{dim}" for dim in data_dims)
-                acc_name = get_tasklet_symbol(name, off, is_target=False)
-                in_memlets[acc_name] = dace.memlet.Memlet.simple(name, ",".join(subset_strs))
+                acc_name = get_tasklet_symbol(name, offset, is_target=False)
+                in_memlets[acc_name] = dace.memlet.Memlet.simple(
+                    name,
+                    ",".join(subset_strs),
+                    dynamic=True,
+                )
+                in_memlets[acc_name].allow_oob = any(
+                    acc.region is not None
+                    for acc in access_collection.ordered_accesses()
+                    if acc.field == name and acc.offset == offset
+                )
 
         out_memlets = dict()
         for name in access_collection.write_fields():
             dimensions = array_dimensions(self.parent_sdfg.arrays[name])
             data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
             subset_strs = [
-                f"{var}{self.origins[name][dim]:+d}"
+                f"{var}{self.compensated_origins[name][dim]:+d}"
                 for dim, var in enumerate("ij0")
                 if dimensions[dim]
             ]
@@ -609,6 +651,11 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
                 name,
                 ",".join(subset_strs),
                 dynamic=any(isinstance(stmt, oir.MaskStmt) for stmt in self.node.oir_node.body),
+            )
+            out_memlets[acc_name].allow_oob = any(
+                acc.region is not None
+                for acc in access_collection.ordered_accesses()
+                if acc.field == name
             )
 
         return in_memlets, out_memlets
@@ -626,7 +673,7 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
         input_nodes = {name: self.res_state.add_read(name) for name in inputs}
         output_nodes = {name: self.res_state.add_write(name) for name in outputs}
 
-        self.res_state.add_mapped_tasklet(
+        _, map_entry, map_exit = self.res_state.add_mapped_tasklet(
             self.node.name + "_tasklet",
             map_ranges=map_ranges,
             inputs=in_memlets,
@@ -637,6 +684,44 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             external_edges=True,
             schedule=self.node.map_schedule,
         )
+
+        # if there are OOB accesses, these are due to regions and can be clamped
+        for edge in self.res_state.in_edges(map_entry):
+            if not any(
+                meml.allow_oob for meml in in_memlets.values() if meml.data == edge.data.data
+            ):
+                continue
+            dims = array_dimensions(self.res_sdfg.arrays[edge.data.data])
+            if dims[0]:
+                res_range = list(edge.data.subset.ranges[0])
+                res_range[0] = max(0, res_range[0])
+                res_range[1] = min(self.res_sdfg.arrays[edge.data.data].shape[0] - 1, res_range[1])
+                edge.data.subset.ranges[0] = tuple(res_range)
+            if dims[1]:
+                res_range = list(edge.data.subset.ranges[int(dims[0])])
+                res_range[0] = max(0, res_range[0])
+                res_range[1] = min(
+                    self.res_sdfg.arrays[edge.data.data].shape[int(dims[0])] - 1, res_range[1]
+                )
+                edge.data.subset.ranges[int(dims[0])] = tuple(res_range)
+        # for edge in self.res_state.out_edges(map_exit):
+        #     if not any(meml.allow_oob for meml in in_memlets.values() if meml.data==edge.data.data):
+        #         continue
+        #     dims = array_dimensions(self.res_sdfg.arrays[edge.data.data])
+        #     if dims[0]:
+        #         res_range = list(edge.data.subset.ranges[0])
+        #         res_range[0] = max(0, res_range[0])
+        #         res_range[1] = min(
+        #             self.res_sdfg.arrays[edge.data.data].shape[0] - 1, res_range[1]
+        #         )
+        #         edge.data.subset.ranges[0] = tuple(res_range)
+        #     if dims[1]:
+        #         res_range = list(edge.data.subset.ranges[int(dims[0])])
+        #         res_range[0] = max(0, res_range[0])
+        #         res_range[1] = min(
+        #             self.res_sdfg.arrays[edge.data.data].shape[int(dims[0])] - 1, res_range[1]
+        #         )
+        #         edge.data.subset.ranges[int(dims[0])] = tuple(res_range)
 
 
 class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):

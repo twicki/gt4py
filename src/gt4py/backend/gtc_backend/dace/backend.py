@@ -109,9 +109,10 @@ def expand_and_wrap_sdfg(
         if array.transient:
             array.lifetime = dace.AllocationLifetime.Persistent
     inner_sdfg = dace.SDFG.from_json(inner_sdfg.to_json())
-    inner_sdfg.expand_library_nodes(recursive=True)
 
-    post_expand_trafos(inner_sdfg)
+    inner_sdfg.expand_library_nodes(recursive=True)
+    # inner_sdfg.view()
+    # post_expand_trafos(inner_sdfg)
 
     extents = compute_legacy_extents(gtir, allow_negative=True)
 
@@ -135,7 +136,8 @@ def expand_and_wrap_sdfg(
             continue
         extent = [e for e, a in zip(extents[name], "IJK") if a in args_data.field_info[name].axes]
         shape = [
-            s + abs(max(el, 0)) for s, (el, eh) in zip(inner_sdfg.arrays[name].shape, extent)
+            s + abs(min(el, 0)) + abs(max(eh, 0))
+            for s, (el, eh) in zip(inner_sdfg.arrays[name].shape, extent)
         ] + [str(d) for d in args_data.field_info[name].data_dims]
         wrapper_sdfg.add_array(
             name,
@@ -147,7 +149,7 @@ def expand_and_wrap_sdfg(
 
         subset_strs[name] = ",".join(
             [
-                f"{max(e[0], 0)}:{max(e[0], 0) + s}"
+                f"{max(e[0], 0)}:{(s  + min(e[1], 0))}"
                 for e, s in zip(extent, inner_sdfg.arrays[name].shape)
             ]
             + [f"0:{d}" for d in args_data.field_info[name].data_dims]
@@ -185,18 +187,18 @@ def expand_and_wrap_sdfg(
 
     from dace.transformation.interstate import InlineTransients
 
-    for state in wrapper_sdfg.states():
-        for nsdfg in state.nodes():
-            if not isinstance(nsdfg, dace.nodes.NestedSDFG):
-                continue
-            from dace.transformation.interstate import InlineSDFG
-
-            InlineSDFG.apply_to(wrapper_sdfg, _nested_sdfg=nsdfg, save=False)
-
-    wrapper_sdfg.apply_transformations_repeated(
-        [*strict_transformations(), MapCollapse, InlineTransients], strict=True
-    )
+    # for state in wrapper_sdfg.states():
+    #     for nsdfg in state.nodes():
+    #         if not isinstance(nsdfg, dace.nodes.NestedSDFG):
+    #             continue
+    #         from dace.transformation.interstate import InlineSDFG
+    #
+    #         InlineSDFG.apply_to(wrapper_sdfg, _nested_sdfg=nsdfg, save=False)
+    # wrapper_sdfg.apply_transformations_repeated(
+    #     [*strict_transformations(), MapCollapse, InlineTransients], strict=True
+    # )
     wrapper_sdfg.validate()
+    # wrapper_sdfg.view()
     return wrapper_sdfg
 
 
@@ -220,6 +222,12 @@ class GTCDaCeExtGenerator:
             base_oir
         )
         sdfg = OirSDFGBuilder().visit(oir)
+        # sdfg.view()
+        # for nsdfg in (
+        #     n for n, _ in sdfg.all_nodes_recursive() if isinstance(n, dace.nodes.LibraryNode)
+        # ):
+        #     for interval, section in nsdfg.sections:
+        #         section.view()
 
         to_device(sdfg, self.backend.storage_info["device"])
 
@@ -228,6 +236,7 @@ class GTCDaCeExtGenerator:
         for tmp_sdfg in sdfg.all_sdfgs_recursive():
             tmp_sdfg.transformation_hist = []
             tmp_sdfg.orig_sdfg = None
+        # sdfg.view()
         sdfg.save(
             self.backend.builder.module_path.joinpath(
                 os.path.dirname(self.backend.builder.module_path),

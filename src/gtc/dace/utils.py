@@ -460,7 +460,8 @@ def oir_field_boundary_computation(stencil: oir.Stencil) -> Dict[str, CartesianI
 
 
 def get_access_collection(
-    node: Union[dace.SDFG, "HorizontalExecutionLibraryNode", "VerticalLoopLibraryNode"]
+    node: Union[dace.SDFG, "HorizontalExecutionLibraryNode", "VerticalLoopLibraryNode"],
+    compensate_regions: bool = False,
 ):
     from gtc.dace.nodes import HorizontalExecutionLibraryNode, VerticalLoopLibraryNode
 
@@ -472,7 +473,7 @@ def get_access_collection(
                 res._ordered_accesses.extend(collection._ordered_accesses)
         return res
     elif isinstance(node, HorizontalExecutionLibraryNode):
-        return AccessCollector.apply(node.oir_node)
+        return AccessCollector.apply(node.oir_node, compensate_regions=compensate_regions)
     else:
         assert isinstance(node, VerticalLoopLibraryNode)
         res = AccessCollector.Result([])
@@ -502,7 +503,7 @@ def nodes_extent_calculation(
             assert isinstance(node, HorizontalExecutionLibraryNode)
             inner_nodes.append(node)
     for node in inner_nodes:
-        access_collection = AccessCollector.apply(node.oir_node)
+        access_collection = AccessCollector.apply(node.oir_node, compensate_regions=True)
         iteration_space = node.iteration_space
         if iteration_space is not None:
             for name, offsets in access_collection.offsets().items():

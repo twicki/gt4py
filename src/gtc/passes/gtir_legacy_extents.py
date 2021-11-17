@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from eve import NodeVisitor
 from eve.utils import XIterable
 from gt4py.definitions import Extent
-from gtc import gtir
+from gtc import common, gtir
 from gtc.passes import utils
 
 
@@ -16,10 +16,13 @@ def _iter_assigns(node: gtir.Stencil) -> XIterable[gtir.ParAssignStmt]:
     return node.iter_tree().if_isinstance(gtir.ParAssignStmt)
 
 
-def _ext_from_off(offset: gtir.CartesianOffset) -> Extent:
-    return Extent(
-        ((min(offset.i, 0), max(offset.i, 0)), (min(offset.j, 0), max(offset.j, 0)), (0, 0))
-    )
+def _ext_from_off(offset: gtir.CartesianOffset, allow_negative: bool = False) -> Extent:
+    if allow_negative:
+        return Extent.from_offset((offset.i, offset.j, 0))
+    else:
+        return Extent(
+            (min(offset.i, 0), max(offset.i, 0)), (min(offset.j, 0), max(offset.j, 0)), (0, 0)
+        )
 
 
 FIELD_EXT_T = Dict[str, Extent]
@@ -61,6 +64,7 @@ class LegacyExtentsVisitor(NodeVisitor):
         ctx: StencilContext,
         **kwargs: Any,
     ) -> None:
+
         ctx.assign_masks.update({id(assign): node.mask for assign in _iter_assigns(node).to_list()})
 
     def visit_ParAssignStmt(
@@ -84,9 +88,12 @@ class LegacyExtentsVisitor(NodeVisitor):
             ctx.assign_conditions.get(id(node), []),
             field_extents=field_extents,
             pa_ctx=pa_ctx,
+            region=horizontal_mask,
             **kwargs,
         )
-        self.visit(node.right, field_extents=field_extents, pa_ctx=pa_ctx, **kwargs)
+        self.visit(
+            node.right, field_extents=field_extents, pa_ctx=pa_ctx, region=horizontal_mask, **kwargs
+        )
         for key, value in pa_ctx.assign_extents.items():
             field_extents[key] |= value
 
@@ -104,22 +111,43 @@ class LegacyExtentsVisitor(NodeVisitor):
         *,
         field_extents: Dict[str, Extent],
         pa_ctx: AssignContext,
+        region: Optional[gtir.HorizontalRegion] = None,
         **kwargs: Any,
     ) -> None:
         if self._allow_negative:
-            default_extent = Extent.from_offset((node.offset.i, node.offset.j, 0))
+            if region is not None:
+                res_extent = []
+                for off, bound in zip((node.offset.i, node.offset.j), (region.i, region.j)):
+                    bound = common.HorizontalInterval(start=bound.start, end=bound.end)
+                    ext = [0, 0]
+                    if bound.start is None:
+                        ext[0] = off
+                    elif bound.start.level == common.LevelMarker.START:
+                        ext[0] = min(off, off + bound.start.offset)
+                    else:
+                        ext[0] = 0
+                    if bound.end is None:
+                        ext[1] = off
+                    elif bound.end.level == common.LevelMarker.END:
+                        ext[1] = max(off, off + bound.end.offset)
+                    else:
+                        ext[1] = 0
+
+                    res_extent.append(ext)
+                res_extent.append((0, 0))
+                default_extent = Extent(res_extent)
+            else:
+                default_extent = Extent.from_offset((node.offset.i, node.offset.j, 0))
         else:
             default_extent = Extent.zeros()
 
         pa_ctx.assign_extents.setdefault(
             node.name, field_extents.setdefault(node.name, default_extent)
         )
-        if self._allow_negative:
-            pa_ctx.assign_extents[node.name] |= pa_ctx.left_extent + Extent.from_offset(
-                (node.offset.i, node.offset.j, 0)
-            )
-        else:
-            pa_ctx.assign_extents[node.name] |= pa_ctx.left_extent + _ext_from_off(node.offset)
+
+        pa_ctx.assign_extents[node.name] |= pa_ctx.left_extent + _ext_from_off(
+            node.offset, allow_negative=True
+        )
 
 
 def compute_legacy_extents(node: gtir.Stencil, allow_negative=False) -> FIELD_EXT_T:

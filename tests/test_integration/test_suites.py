@@ -741,3 +741,686 @@ class TestReadOutsideKInterval(gt_testing.StencilTestSuite):
 
     def validation(field_in, field_out, *, domain, origin):
         field_out[:, :, :] = field_in[:, :, 0:-2] + field_in[:, :, 2:]
+
+
+Iend = gtscript.AxisIndex(axis=gtscript.I, index=-1, offset=1)
+Jend = gtscript.AxisIndex(axis=gtscript.J, index=-1, offset=1)
+
+
+class TestRegionFullDomain(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "Iend": gt_testing.global_name(singleton=Iend),
+        "Jend": gt_testing.global_name(singleton=Jend),
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(1, 0), (0, 1), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            from __externals__ import Iend, Jend
+
+            with horizontal(region[0:Iend, 0:Jend]):
+                field_out = (  # noqa: F841  # Local name is assigned to but never used
+                    field_in[-1, 0, 0] + field_in[0, 1, 0]
+                )
+
+    def validation(field_in, field_out, *, domain, origin):
+        @gtscript.stencil(backend="numpy")
+        def ref_stencil(
+            field_in: gtscript.Field[np.float64], field_out: gtscript.Field[np.float64]
+        ):
+            with computation(PARALLEL), interval(...):
+                field_out = (  # noqa: F841  # Local name is assigned to but never used
+                    field_in[-1, 0, 0] + field_in[0, 1, 0]
+                )
+
+        ref_stencil(field_in, field_out, domain=domain, origin=origin)
+
+
+class TestRegionNoExtendLow(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "Iend": gt_testing.global_name(singleton=Iend),
+        "Jend": gt_testing.global_name(singleton=Jend),
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            from __externals__ import Iend, Jend
+
+            with horizontal(region[1:Iend, :]):
+                field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+                    -1, 0, 0
+                ]
+
+    def validation(field_in, field_out, *, domain, origin):
+        @gtscript.stencil(backend="numpy")
+        def ref_stencil(
+            field_in: gtscript.Field[np.float64], field_out: gtscript.Field[np.float64]
+        ):
+            with computation(PARALLEL), interval(...):
+                field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+                    -1, 0, 0
+                ]
+
+        domain = (domain[0] - 1, domain[1], domain[2])
+        origin = {k: (orig[0] + 1, orig[1], orig[2]) for k, orig in origin.items()}
+        ref_stencil(field_in, field_out, domain=domain, origin=origin)
+
+
+class TestRegionNoExtendHigh(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "Iend": gt_testing.global_name(singleton=Iend),
+        "Jend": gt_testing.global_name(singleton=Jend),
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            from __externals__ import Iend, Jend
+
+            with horizontal(region[:, 0 : Jend - 1]):
+                field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+                    0, 1, 0
+                ]
+
+    def validation(field_in, field_out, *, domain, origin):
+        @gtscript.stencil(backend="numpy")
+        def ref_stencil(
+            field_in: gtscript.Field[np.float64], field_out: gtscript.Field[np.float64]
+        ):
+            with computation(PARALLEL), interval(...):
+                field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+                    0, 1, 0
+                ]
+
+        domain = (domain[0], domain[1] - 1, domain[2])
+        origin = {k: (orig[0], orig[1], orig[2]) for k, orig in origin.items()}
+        ref_stencil(field_in, field_out, domain=domain, origin=origin)
+
+        # "j_end": AxisIndex(axis=J, index=-1, offset=0),
+
+
+class TestRegionNoExtendHighSingleIdx(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "Iend": gt_testing.global_name(singleton=Iend),
+        "Jend": gt_testing.global_name(singleton=Jend),
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            from __externals__ import Iend, Jend
+
+            with horizontal(region[:, Jend - 2]):
+                field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+                    0, 1, 0
+                ]
+
+    def validation(field_in, field_out, *, domain, origin):
+        # @gtscript.stencil(backend="numpy")
+        # def ref_stencil(
+        #     field_in: gtscript.Field[np.float64], field_out: gtscript.Field[np.float64]
+        # ):
+        #     with computation(PARALLEL), interval(...):
+        #         field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+        #             0, 1, 0
+        #         ]
+
+        field_out[:, -2, :] = field_in[:, -1, :]
+        # domain = (domain[0], domain[1]-1, domain[2])
+        # origin = {k: (orig[0], orig[1], orig[2]) for k, orig in origin.items()}
+        # ref_stencil(field_in, field_out, domain=domain, origin=origin)
+
+
+class TestRegionReadInsideLow(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "Iend": gt_testing.global_name(singleton=Iend),
+        "Jend": gt_testing.global_name(singleton=Jend),
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            from __externals__ import Iend, Jend
+
+            with horizontal(region[:, Jend - 1]):
+                field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+                    0, -1, 0
+                ]
+
+    def validation(field_in, field_out, *, domain, origin):
+        # @gtscript.stencil(backend="numpy")
+        # def ref_stencil(
+        #     field_in: gtscript.Field[np.float64], field_out: gtscript.Field[np.float64]
+        # ):
+        #     with computation(PARALLEL), interval(...):
+        #         field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
+        #             0, 1, 0
+        #         ]
+
+        field_out[:, -1, :] = field_in[:, -2, :]
+        # domain = (domain[0], domain[1]-1, domain[2])
+        # origin = {k: (orig[0], orig[1], orig[2]) for k, orig in origin.items()}
+        # ref_stencil(field_in, field_out, domain=domain, origin=origin)
+
+
+class TestRegionExtendHighRange(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "Iend": gt_testing.global_name(singleton=Iend),
+        "Jend": gt_testing.global_name(singleton=Jend),
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            from __externals__ import Iend, Jend
+
+            with horizontal(region[:, : Jend - 2]):
+                field_out = field_in[0, 1, 0]
+
+    def validation(field_in, field_out, *, domain, origin):
+        field_out[:, :-2, :] = field_in[:, 1:-1, :]
+
+
+class TestRegionReadInsideHigh(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(4, 4), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            with horizontal(region[:, :3]):
+                field_out = field_in[0, 1, 0]
+
+    def validation(field_in, field_out, *, domain, origin):
+        field_out[:, :3, :] = field_in[:, 1:4, :]
+
+
+# comact 4-pt cubic interpolation
+c1 = 2.0 / 3.0
+c2 = -1.0 / 6.0
+d1 = 0.375
+d2 = -1.0 / 24.0
+# PPM volume mean form
+b1 = 7.0 / 12.0
+b2 = -1.0 / 12.0
+# 4-pt Lagrange interpolation
+a1 = 9.0 / 16.0
+a2 = -1.0 / 16.0
+
+FloatField = gtscript.Field[np.float64]
+from gt4py.gtscript import AxisIndex, I, J, K
+
+
+FloatFieldIJ = gtscript.Field[gtscript.IJ, np.float64]
+
+N = 12
+NK = 80
+import gt4py
+
+
+def test_Region_divergence_corner():
+    # def a2b_interpolation(
+    #     tmp_qout_edges: FloatField,
+    #     qout: FloatField,
+    #     qx: FloatField,
+    #     qy: FloatField,
+    # ):
+    #     from __externals__ import i_end, i_start, j_end, j_start
+    #
+    #     with computation(PARALLEL), interval(...):
+    #         with horizontal(region[:, j_end]):
+    #             qout = tmp_qout_edges[0, 1, 0]  # (qx[0, -1, 0] + qx) +
+    def divergence_corner(
+        u: FloatField,
+        v: FloatField,
+        ua: FloatField,
+        va: FloatField,
+        dxc: FloatFieldIJ,
+        dyc: FloatFieldIJ,
+        sin_sg1: FloatFieldIJ,
+        sin_sg2: FloatFieldIJ,
+        sin_sg3: FloatFieldIJ,
+        sin_sg4: FloatFieldIJ,
+        cos_sg1: FloatFieldIJ,
+        cos_sg2: FloatFieldIJ,
+        cos_sg3: FloatFieldIJ,
+        cos_sg4: FloatFieldIJ,
+        rarea_c: FloatFieldIJ,
+        divg_d: FloatField,
+    ):
+        """Calculate divg on d-grid.
+        Args:
+            u: x-velocity (input)
+            v: y-velocity (input)
+            ua: x-velocity on a (input)
+            va: y-velocity on a (input)
+            dxc: grid spacing in x-direction (input)
+            dyc: grid spacing in y-direction (input)
+            sin_sg1: grid sin(sg1) (input)
+            sin_sg2: grid sin(sg2) (input)
+            sin_sg3: grid sin(sg3) (input)
+            sin_sg4: grid sin(sg4) (input)
+            cos_sg1: grid cos(sg1) (input)
+            cos_sg2: grid cos(sg2) (input)
+            cos_sg3: grid cos(sg3) (input)
+            cos_sg4: grid cos(sg4) (input)
+            rarea_c: inverse cell areas on c-grid (input)
+            divg_d: divergence on d-grid (output)
+        """
+        from __externals__ import i_end, i_start, j_end, j_start
+
+        with computation(PARALLEL), interval(...):
+            uf = (
+                (u - 0.25 * (va[0, -1, 0] + va) * (cos_sg4[0, -1] + cos_sg2))
+                * dyc
+                * 0.5
+                * (sin_sg4[0, -1] + sin_sg2)
+            )
+
+            vf = (
+                (v - 0.25 * (ua[-1, 0, 0] + ua) * (cos_sg3[-1, 0] + cos_sg1))
+                * dxc
+                * 0.5
+                * (sin_sg3[-1, 0] + sin_sg1)
+            )
+
+            divg_d = (vf[0, -1, 0] - vf + uf[-1, 0, 0] - uf) * rarea_c
+
+            # # The original code is:
+            # # ---------
+            # # with horizontal(region[:, j_start], region[:, j_end + 1]):
+            # #     uf = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
+            # # with horizontal(region[i_start, :], region[i_end + 1, :]):
+            # #     vf = v * dxc * 0.5 * (sin_sg3[-1, 0] + sin_sg1)
+            # # with horizontal(region[i_start, j_start], region[i_end + 1, j_start]):
+            # #     divg_d = (-vf + uf[-1, 0, 0] - uf) * rarea_c
+            # # with horizontal(region[i_end + 1, j_end + 1], region[i_start, j_end + 1]):
+            # #     divg_d = (vf[0, -1, 0] + uf[-1, 0, 0] - uf) * rarea_c
+            # # ---------
+            # #
+            # # Code with regions restrictions:
+            # # ---------
+            # # variables ending with 1 are the shifted versions
+            # # in the future we could use gtscript functions when they support shifts
+            #
+            # with horizontal(region[i_start, :], region[i_end + 1, :]):
+            #     vf0 = v * dxc * 0.5 * (sin_sg3[-1, 0] + sin_sg1)
+            #     vf1 = v[0, -1, 0] * dxc[0, -1] * 0.5 * (sin_sg3[-1, -1] + sin_sg1[0, -1])
+            #     uf1 = (
+            #         (
+            #             u[-1, 0, 0]
+            #             - 0.25 * (va[-1, -1, 0] + va[-1, 0, 0]) * (cos_sg4[-1, -1] + cos_sg2[-1, 0])
+            #         )
+            #         * dyc[-1, 0]
+            #         * 0.5
+            #         * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
+            #     )
+            #     divg_d = (vf1 - vf0 + uf1 - uf) * rarea_c
+            #
+            # with horizontal(region[:, j_start], region[:, j_end + 1]):
+            #     uf0 = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
+            #     uf1 = u[-1, 0, 0] * dyc[-1, 0] * 0.5 * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
+            #     vf1 = (
+            #         (
+            #             v[0, -1, 0]
+            #             - 0.25 * (ua[-1, -1, 0] + ua[0, -1, 0]) * (cos_sg3[-1, -1] + cos_sg1[0, -1])
+            #         )
+            #         * dxc[0, -1]
+            #         * 0.5
+            #         * (sin_sg3[-1, -1] + sin_sg1[0, -1])
+            #     )
+            #     divg_d = (vf1 - vf + uf1 - uf0) * rarea_c
+            #
+            # with horizontal(region[i_start, j_start], region[i_end + 1, j_start]):
+            #     uf1 = u[-1, 0, 0] * dyc[-1, 0] * 0.5 * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
+            #     vf0 = v * dxc * 0.5 * (sin_sg3[-1, 0] + sin_sg1)
+            #     uf0 = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
+            #     divg_d = (-vf0 + uf1 - uf0) * rarea_c
+            #
+            # with horizontal(region[i_end + 1, j_end + 1], region[i_start, j_end + 1]):
+            #     vf1 = v[0, -1, 0] * dxc[0, -1] * 0.5 * (sin_sg3[-1, -1] + sin_sg1[0, -1])
+            #     uf1 = u[-1, 0, 0] * dyc[-1, 0] * 0.5 * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
+            #     uf0 = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
+            #     divg_d = (vf1 + uf1 - uf0) * rarea_c
+
+            # ---------
+
+    cand_backend = "gtc:dace"
+    # cand_backend = "gtc:gt:cpu_ifirst"
+    # cand_backend = "numpy"
+
+    externals = {
+        "i_start": AxisIndex(axis=I, index=0, offset=0),
+        "local_is": AxisIndex(axis=I, index=0, offset=0),
+        "i_end": AxisIndex(axis=I, index=-1, offset=-1),
+        "local_ie": AxisIndex(axis=I, index=-1, offset=-1),
+        "j_start": AxisIndex(axis=J, index=0, offset=0),
+        "local_js": AxisIndex(axis=J, index=0, offset=0),
+        "j_end": AxisIndex(axis=J, index=-1, offset=-1),
+        "local_je": AxisIndex(axis=J, index=-1, offset=-1),
+    }
+
+    ref_stencil = gtscript.stencil(
+        definition=divergence_corner, backend="numpy", rebuild=True, externals=externals
+    )
+    dace_stencil = gtscript.stencil(
+        definition=divergence_corner, backend="gtc:dace", rebuild=True, externals=externals
+    )
+
+    data1 = np.random.randn(N + 7, N + 7, NK)
+    data2 = np.random.randn(N + 7, N + 7, NK)
+    data3 = np.random.randn(N + 7, N + 7, NK)
+    data4 = np.random.randn(N + 7, N + 7, NK)
+    data5 = np.random.randn(N + 7, N + 7)
+    data6 = np.random.randn(N + 7, N + 7)
+    data7 = np.random.randn(N + 7, N + 7)
+    data8 = np.random.randn(N + 7, N + 7)
+    data9 = np.random.randn(N + 7, N + 7)
+    data10 = np.random.randn(N + 7, N + 7)
+    data11 = np.random.randn(N + 7, N + 7)
+    data12 = np.random.randn(N + 7, N + 7)
+    data13 = np.random.randn(N + 7, N + 7)
+    data14 = np.random.randn(N + 7, N + 7)
+    data15 = np.random.randn(N + 7, N + 7)
+    u = gt4py.storage.from_array(
+        data=data1,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    v = gt4py.storage.from_array(
+        data=data2,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    ua = gt4py.storage.from_array(
+        data=data3,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    va = gt4py.storage.from_array(
+        data=data4,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    dxc = gt4py.storage.from_array(
+        data=data5,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    dyc = gt4py.storage.from_array(
+        data=data6,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    sin_sg1 = gt4py.storage.from_array(
+        data=data7,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    sin_sg2 = gt4py.storage.from_array(
+        data=data8,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    sin_sg3 = gt4py.storage.from_array(
+        data=data9,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    sin_sg4 = gt4py.storage.from_array(
+        data=data10,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    cos_sg1 = gt4py.storage.from_array(
+        data=data11,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    cos_sg2 = gt4py.storage.from_array(
+        data=data12,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    cos_sg3 = gt4py.storage.from_array(
+        data=data13,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    cos_sg4 = gt4py.storage.from_array(
+        data=data14,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    rarea_c = gt4py.storage.from_array(
+        data=data15,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    # tmp_qout_edges = gt4py.storage.from_array(
+    #     data=data1,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qx = gt4py.storage.from_array(
+    #     data=data2,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qy = gt4py.storage.from_array(
+    #     data=data3,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # # qx_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    # # qy_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    divg_d_ref = gt4py.storage.zeros(
+        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+
+    # qx_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    # qy_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    divg_d_cand = gt4py.storage.zeros(
+        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+
+    ref_stencil(
+        u,
+        v,
+        ua,
+        va,
+        dxc,
+        dyc,
+        sin_sg1,
+        sin_sg2,
+        sin_sg3,
+        sin_sg4,
+        cos_sg1,
+        cos_sg2,
+        cos_sg3,
+        cos_sg4,
+        rarea_c,
+        divg_d_ref,
+        domain=(N, N, NK - 3),
+    )
+    dace_stencil(
+        u,
+        v,
+        ua,
+        va,
+        dxc,
+        dyc,
+        sin_sg1,
+        sin_sg2,
+        sin_sg3,
+        sin_sg4,
+        cos_sg1,
+        cos_sg2,
+        cos_sg3,
+        cos_sg4,
+        rarea_c,
+        divg_d_cand,
+        domain=(N, N, NK - 3),
+    )
+
+    np.testing.assert_allclose(divg_d_cand, divg_d_ref)
+    # np.testing.assert_allclose(qx_cand, qx_ref)
+    # np.testing.assert_allclose(qy_cand, qy_ref)
+
+
+# class TestRegionExtendHighAcutallyNotHaha(gt_testing.StencilTestSuite):
+#     dtypes = {
+#         "field_in": np.float64,
+#         "field_out": np.float64,
+#     }
+#     domain_range = [(4, 4), (4, 4), (4, 4)]
+#     backends = INTERNAL_BACKENDS
+#     symbols = {
+#         "field_in": gt_testing.field(
+#             in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+#         ),
+#         "field_out": gt_testing.field(
+#             in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+#         ),
+#     }
+#
+#     def definition(field_in, field_out):
+#         with computation(PARALLEL), interval(...):
+#             field_out = field_in[0, -1, 0]
+#
+#     def validation(field_in, field_out, *, domain, origin):
+#         # field_out[:, :-1, :] = field_in[:, 1:, :]
+#         field_out[:, 1:, :] = field_in[:, :-1, :]
