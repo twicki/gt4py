@@ -21,7 +21,7 @@ def _ext_from_off(offset: gtir.CartesianOffset, allow_negative: bool = False) ->
         return Extent.from_offset((offset.i, offset.j, 0))
     else:
         return Extent(
-            (min(offset.i, 0), max(offset.i, 0)), (min(offset.j, 0), max(offset.j, 0)), (0, 0)
+            ((min(offset.i, 0), max(offset.i, 0)), (min(offset.j, 0), max(offset.j, 0)), (0, 0))
         )
 
 
@@ -117,19 +117,19 @@ class LegacyExtentsVisitor(NodeVisitor):
         if self._allow_negative:
             if region is not None:
                 res_extent = []
-                for off, bound in zip((node.offset.i, node.offset.j), (region.i, region.j)):
-                    bound = common.HorizontalInterval(start=bound.start, end=bound.end)
+                for off, interval in zip((node.offset.i, node.offset.j), (region.i, region.j)):
+                    interval = common.HorizontalInterval(start=interval.start, end=interval.end)
                     ext = [0, 0]
-                    if bound.start is None:
+                    if interval.start is None:
                         ext[0] = off
-                    elif bound.start.level == common.LevelMarker.START:
-                        ext[0] = min(off, off + bound.start.offset)
+                    elif interval.start.level == common.LevelMarker.START:
+                        ext[0] = min(off, off + interval.start.offset)
                     else:
                         ext[0] = 0
-                    if bound.end is None:
+                    if interval.end is None:
                         ext[1] = off
-                    elif bound.end.level == common.LevelMarker.END:
-                        ext[1] = max(off, off + bound.end.offset)
+                    elif interval.end.level == common.LevelMarker.END:
+                        ext[1] = max(off, off + interval.end.offset)
                     else:
                         ext[1] = 0
 
@@ -146,7 +146,7 @@ class LegacyExtentsVisitor(NodeVisitor):
         )
 
         pa_ctx.assign_extents[node.name] |= pa_ctx.left_extent + _ext_from_off(
-            node.offset, allow_negative=True
+            node.offset, allow_negative=self._allow_negative
         )
 
 

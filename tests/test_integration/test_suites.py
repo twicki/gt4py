@@ -1088,80 +1088,10 @@ def test_Region_divergence_corner():
         from __externals__ import i_end, i_start, j_end, j_start
 
         with computation(PARALLEL), interval(...):
-            uf = (
-                (u - 0.25 * (va[0, -1, 0] + va) * (cos_sg4[0, -1] + cos_sg2))
-                * dyc
-                * 0.5
-                * (sin_sg4[0, -1] + sin_sg2)
-            )
 
-            vf = (
-                (v - 0.25 * (ua[-1, 0, 0] + ua) * (cos_sg3[-1, 0] + cos_sg1))
-                * dxc
-                * 0.5
-                * (sin_sg3[-1, 0] + sin_sg1)
-            )
-
-            divg_d = (vf[0, -1, 0] - vf + uf[-1, 0, 0] - uf) * rarea_c
-
-            # # The original code is:
-            # # ---------
-            # # with horizontal(region[:, j_start], region[:, j_end + 1]):
-            # #     uf = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
-            # # with horizontal(region[i_start, :], region[i_end + 1, :]):
-            # #     vf = v * dxc * 0.5 * (sin_sg3[-1, 0] + sin_sg1)
-            # # with horizontal(region[i_start, j_start], region[i_end + 1, j_start]):
-            # #     divg_d = (-vf + uf[-1, 0, 0] - uf) * rarea_c
-            # # with horizontal(region[i_end + 1, j_end + 1], region[i_start, j_end + 1]):
-            # #     divg_d = (vf[0, -1, 0] + uf[-1, 0, 0] - uf) * rarea_c
-            # # ---------
-            # #
-            # # Code with regions restrictions:
-            # # ---------
-            # # variables ending with 1 are the shifted versions
-            # # in the future we could use gtscript functions when they support shifts
-            #
-            # with horizontal(region[i_start, :], region[i_end + 1, :]):
-            #     vf0 = v * dxc * 0.5 * (sin_sg3[-1, 0] + sin_sg1)
-            #     vf1 = v[0, -1, 0] * dxc[0, -1] * 0.5 * (sin_sg3[-1, -1] + sin_sg1[0, -1])
-            #     uf1 = (
-            #         (
-            #             u[-1, 0, 0]
-            #             - 0.25 * (va[-1, -1, 0] + va[-1, 0, 0]) * (cos_sg4[-1, -1] + cos_sg2[-1, 0])
-            #         )
-            #         * dyc[-1, 0]
-            #         * 0.5
-            #         * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
-            #     )
-            #     divg_d = (vf1 - vf0 + uf1 - uf) * rarea_c
-            #
-            # with horizontal(region[:, j_start], region[:, j_end + 1]):
-            #     uf0 = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
-            #     uf1 = u[-1, 0, 0] * dyc[-1, 0] * 0.5 * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
-            #     vf1 = (
-            #         (
-            #             v[0, -1, 0]
-            #             - 0.25 * (ua[-1, -1, 0] + ua[0, -1, 0]) * (cos_sg3[-1, -1] + cos_sg1[0, -1])
-            #         )
-            #         * dxc[0, -1]
-            #         * 0.5
-            #         * (sin_sg3[-1, -1] + sin_sg1[0, -1])
-            #     )
-            #     divg_d = (vf1 - vf + uf1 - uf0) * rarea_c
-            #
-            # with horizontal(region[i_start, j_start], region[i_end + 1, j_start]):
-            #     uf1 = u[-1, 0, 0] * dyc[-1, 0] * 0.5 * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
-            #     vf0 = v * dxc * 0.5 * (sin_sg3[-1, 0] + sin_sg1)
-            #     uf0 = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
-            #     divg_d = (-vf0 + uf1 - uf0) * rarea_c
-            #
-            # with horizontal(region[i_end + 1, j_end + 1], region[i_start, j_end + 1]):
-            #     vf1 = v[0, -1, 0] * dxc[0, -1] * 0.5 * (sin_sg3[-1, -1] + sin_sg1[0, -1])
-            #     uf1 = u[-1, 0, 0] * dyc[-1, 0] * 0.5 * (sin_sg4[-1, -1] + sin_sg2[-1, 0])
-            #     uf0 = u * dyc * 0.5 * (sin_sg4[0, -1] + sin_sg2)
-            #     divg_d = (vf1 + uf1 - uf0) * rarea_c
-
-            # ---------
+            uf = va[-1, 0, 0]
+            vf = 0.0
+            divg_d = vf[0, -1, 0] - vf + uf[-1, 0, 0] - uf
 
     cand_backend = "gtc:dace"
     # cand_backend = "gtc:gt:cpu_ifirst"
@@ -1182,7 +1112,7 @@ def test_Region_divergence_corner():
         definition=divergence_corner, backend="numpy", rebuild=True, externals=externals
     )
     dace_stencil = gtscript.stencil(
-        definition=divergence_corner, backend="gtc:dace", rebuild=True, externals=externals
+        definition=divergence_corner, backend=cand_backend, rebuild=True, externals=externals
     )
 
     data1 = np.random.randn(N + 7, N + 7, NK)
@@ -1344,7 +1274,7 @@ def test_Region_divergence_corner():
     # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
     # # )
     divg_d_ref = gt4py.storage.zeros(
-        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+        "numpy", default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
     )
 
     # qx_cand = gt4py.storage.zeros(

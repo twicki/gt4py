@@ -48,6 +48,7 @@ from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
 from gtc.passes.oir_optimizations.inlining import MaskInlining
 from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
 from gtc.passes.oir_pipeline import DefaultPipeline
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 
 
 if TYPE_CHECKING:
@@ -136,8 +137,7 @@ def expand_and_wrap_sdfg(
             continue
         extent = [e for e, a in zip(extents[name], "IJK") if a in args_data.field_info[name].axes]
         shape = [
-            s + abs(min(el, 0)) + abs(max(eh, 0))
-            for s, (el, eh) in zip(inner_sdfg.arrays[name].shape, extent)
+            s + abs(max(el, 0)) for s, (el, _) in zip(inner_sdfg.arrays[name].shape, extent)
         ] + [str(d) for d in args_data.field_info[name].data_dims]
         wrapper_sdfg.add_array(
             name,
@@ -149,7 +149,7 @@ def expand_and_wrap_sdfg(
 
         subset_strs[name] = ",".join(
             [
-                f"{max(e[0], 0)}:{(s  + min(e[1], 0))}"
+                f"{max(e[0], 0)}:{max(e[0], 0) + s}"
                 for e, s in zip(extent, inner_sdfg.arrays[name].shape)
             ]
             + [f"0:{d}" for d in args_data.field_info[name].data_dims]
@@ -185,8 +185,8 @@ def expand_and_wrap_sdfg(
         if info is not None and name not in wrapper_sdfg.symbols:
             wrapper_sdfg.add_symbol(name, nsdfg.sdfg.symbols[name])
 
-    from dace.transformation.interstate import InlineTransients
-
+    # from dace.transformation.interstate import InlineTransients
+    #
     # for state in wrapper_sdfg.states():
     #     for nsdfg in state.nodes():
     #         if not isinstance(nsdfg, dace.nodes.NestedSDFG):
@@ -214,6 +214,7 @@ class GTCDaCeExtGenerator:
                 MaskStmtMerging,
                 MaskInlining,
                 FillFlushToLocalKCaches,
+                OnTheFlyMerging,
             ]
         )
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
@@ -236,7 +237,7 @@ class GTCDaCeExtGenerator:
         for tmp_sdfg in sdfg.all_sdfgs_recursive():
             tmp_sdfg.transformation_hist = []
             tmp_sdfg.orig_sdfg = None
-        # sdfg.view()
+        sdfg.view()
         sdfg.save(
             self.backend.builder.module_path.joinpath(
                 os.path.dirname(self.backend.builder.module_path),
@@ -308,9 +309,12 @@ class DaCeComputationCodegen:
         fmt = "dace_handle.__{sdfg_id}_{name} = allocate(allocator, gt::meta::lazy::id<{dtype}>(), {size})();"
         return [
             fmt.format(
-                sdfg_id=sdfg.sdfg_id, name=name, dtype=array.dtype.ctype, size=array.total_size
+                sdfg_id=array_sdfg.sdfg_id,
+                name=name,
+                dtype=array.dtype.ctype,
+                size=array.total_size,
             )
-            for _, name, array in sdfg.arrays_recursive()
+            for array_sdfg, name, array in sdfg.arrays_recursive()
             if array.transient and array.lifetime == dace.AllocationLifetime.Persistent
         ]
 
