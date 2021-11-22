@@ -187,7 +187,8 @@ class AccessCollector(NodeVisitor):
         cls().visit(node, accesses=result._ordered_accesses, **kwargs)
 
         if compensate_regions:
-            return cls._compensate_regions(result)
+            result = cls._compensate_regions(result)
+            return result
 
         return result
 

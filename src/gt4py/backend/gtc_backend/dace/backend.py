@@ -237,7 +237,7 @@ class GTCDaCeExtGenerator:
         for tmp_sdfg in sdfg.all_sdfgs_recursive():
             tmp_sdfg.transformation_hist = []
             tmp_sdfg.orig_sdfg = None
-        sdfg.view()
+        # sdfg.view()
         sdfg.save(
             self.backend.builder.module_path.joinpath(
                 os.path.dirname(self.backend.builder.module_path),

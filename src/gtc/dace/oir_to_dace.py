@@ -116,7 +116,8 @@ class BaseOirSDFGBuilder(ABC):
         return None
 
     def _get_access_collection(
-        self, node: "Union[HorizontalExecutionLibraryNode, VerticalLoopLibraryNode, SDFG]"
+        self,
+        node: "Union[HorizontalExecutionLibraryNode, VerticalLoopLibraryNode, SDFG]",
     ) -> "AccessCollector.Result":
         if isinstance(node, SDFG):
             res = AccessCollector.Result([])
@@ -133,9 +134,9 @@ class BaseOirSDFGBuilder(ABC):
                     res._ordered_accesses.extend(collection._ordered_accesses)
             return res
         elif isinstance(node, HorizontalExecutionLibraryNode):
-            if id(node.oir_node) not in self._access_collection_cache:
+            if (True, id(node.oir_node)) not in self._access_collection_cache:
                 self._access_collection_cache[id(node.oir_node)] = AccessCollector.apply(
-                    node.oir_node, compensate_regions=True
+                    node.oir_node
                 )
             return self._access_collection_cache[id(node.oir_node)]
         else:
@@ -461,16 +462,21 @@ class VerticalLoopSectionOirSDFGBuilder(BaseOirSDFGBuilder):
         iteration_space = node.iteration_space
         assert iteration_space is not None
         collection = self._get_access_collection(node)
-        for name in collection.read_fields():
-            access_space = CartesianIJIndexSpace.from_offset(collection.read_offsets()[name].pop())
-            for offset in collection.read_offsets()[name]:
-                access_space = access_space | CartesianIJIndexSpace.from_offset(offset)
-            input_spaces[name] = access_space.compose(iteration_space)
-        for name in collection.write_fields():
-            access_space = CartesianIJIndexSpace.from_offset(collection.write_offsets()[name].pop())
-            for offset in collection.write_offsets()[name]:
-                access_space = access_space | CartesianIJIndexSpace.from_offset(offset)
-            output_spaces[name] = access_space.compose(iteration_space)
+
+        access_spaces: Dict[str, CartesianIJIndexSpace] = dict()
+        for acc in collection.read_accesses():
+            access_spaces.setdefault(acc.field, CartesianIJIndexSpace.from_access(acc))
+            access_spaces[acc.field] |= CartesianIJIndexSpace.from_access(acc)
+        for k, v in access_spaces.items():
+            input_spaces[k] = v.compose(iteration_space)
+
+        access_spaces = dict()
+        for acc in collection.write_accesses():
+            access_spaces.setdefault(acc.field, CartesianIJIndexSpace.from_access(acc))
+            access_spaces[acc.field] |= CartesianIJIndexSpace.from_access(acc)
+        for k, v in access_spaces.items():
+            output_spaces[k] = v.compose(iteration_space)
+
         return input_spaces, output_spaces
 
 
@@ -580,30 +586,18 @@ class StencilOirSDFGBuilder(BaseOirSDFGBuilder):
                 iteration_space = n.iteration_space
                 assert iteration_space is not None
                 collection = self._get_access_collection(n)
-                for name in collection.read_fields():
-                    access_space = CartesianIJIndexSpace.from_offset(
-                        collection.read_offsets()[name].pop()
-                    )
-                    for offset in collection.read_offsets()[name]:
-                        access_space = access_space | CartesianIJIndexSpace.from_offset(offset)
-                    if name not in input_spaces:
-                        input_spaces[name] = access_space.compose(iteration_space)
+                for acc in collection.read_accesses():
+                    access_space = CartesianIJIndexSpace.from_access(acc)
+                    if acc.field not in input_spaces:
+                        input_spaces[acc.field] = access_space.compose(iteration_space)
                     else:
-                        input_spaces[name] = input_spaces[name] | access_space.compose(
-                            iteration_space
-                        )
-                for name in collection.write_fields():
-                    access_space = CartesianIJIndexSpace.from_offset(
-                        collection.write_offsets()[name].pop()
-                    )
-                    for offset in collection.write_offsets()[name]:
-                        access_space = access_space | CartesianIJIndexSpace.from_offset(offset)
-                    if name not in output_spaces:
-                        output_spaces[name] = access_space.compose(iteration_space)
+                        input_spaces[acc.field] |= access_space.compose(iteration_space)
+                for acc in collection.write_accesses():
+                    access_space = CartesianIJIndexSpace.from_access(acc)
+                    if acc.field not in output_spaces:
+                        output_spaces[acc.field] = access_space.compose(iteration_space)
                     else:
-                        output_spaces[name] = output_spaces[name] | access_space.compose(
-                            iteration_space
-                        )
+                        output_spaces[acc.field] |= access_space.compose(iteration_space)
         return input_spaces, output_spaces
 
     def _get_collection_from_sections(self, sections):

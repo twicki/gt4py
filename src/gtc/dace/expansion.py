@@ -163,8 +163,10 @@ class TaskletCodegen(codegen.TemplatedGenerator):
         mask_str = ""
         indent = ""
         if node.mask is not None:
-            mask_str = f"if {self.visit(node.mask, is_target=False, **kwargs)}:"
-            indent = "    "
+            cond_str = self.visit(node.mask, is_target=False, **kwargs)
+            if cond_str:
+                mask_str = f"if {cond_str}:"
+                indent = "    "
         body_code = self.visit(node.body, targets=kwargs["targets"])
         body_code = [indent + b for b in body_code]
         return "\n".join([mask_str] + body_code)
@@ -672,7 +674,6 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
         outputs = [name[len("OUT_") :] for name in self.node.out_connectors]
         input_nodes = {name: self.res_state.add_read(name) for name in inputs}
         output_nodes = {name: self.res_state.add_write(name) for name in outputs}
-
         _, map_entry, map_exit = self.res_state.add_mapped_tasklet(
             self.node.name + "_tasklet",
             map_ranges=map_ranges,

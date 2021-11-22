@@ -981,11 +981,11 @@ class TestRegionExtendHighRange(gt_testing.StencilTestSuite):
         with computation(PARALLEL), interval(...):
             from __externals__ import Iend, Jend
 
-            with horizontal(region[:, : Jend - 2]):
-                field_out = field_in[0, 1, 0]
+            with horizontal(region[: Iend - 2, :]):
+                field_out = field_in[1, 0, 0]
 
     def validation(field_in, field_out, *, domain, origin):
-        field_out[:, :-2, :] = field_in[:, 1:-1, :]
+        field_out[:-2, :, :] = field_in[1:-1, :, :]
 
 
 class TestRegionReadInsideHigh(gt_testing.StencilTestSuite):
@@ -1013,6 +1013,32 @@ class TestRegionReadInsideHigh(gt_testing.StencilTestSuite):
         field_out[:, :3, :] = field_in[:, 1:4, :]
 
 
+class TestRegionDoubleRegion(gt_testing.StencilTestSuite):
+    dtypes = {
+        "field_in": np.float64,
+        "field_out": np.float64,
+    }
+    domain_range = [(10, 10), (4, 4), (4, 4)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "field_in": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+        "field_out": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(field_in, field_out):
+        with computation(PARALLEL), interval(...):
+            with horizontal(region[3, :], region[Iend - 3, :]):
+                field_out = field_in[-1, 0, 0]
+
+    def validation(field_in, field_out, *, domain, origin):
+        field_out[3, :, :] = field_in[2, :, :]
+        field_out[-3, :, :] = field_in[-4, :, :]
+
+
 # comact 4-pt cubic interpolation
 c1 = 2.0 / 3.0
 c2 = -1.0 / 6.0
@@ -1036,7 +1062,8 @@ NK = 80
 import gt4py
 
 
-def test_Region_divergence_corner():
+@pytest.mark.parametrize("cand_backend", INTERNAL_BACKENDS)
+def test_Region_divergence_corner(cand_backend):
     # def a2b_interpolation(
     #     tmp_qout_edges: FloatField,
     #     qout: FloatField,
@@ -1091,9 +1118,9 @@ def test_Region_divergence_corner():
 
             uf = va[-1, 0, 0]
             vf = 0.0
-            divg_d = vf[0, -1, 0] - vf + uf[-1, 0, 0] - uf
+            divg_d = vf[0, -1,  0] - vf + uf[-1, 0, 0] - uf
 
-    cand_backend = "gtc:dace"
+    # cand_backend = "gtc:dace"
     # cand_backend = "gtc:gt:cpu_ifirst"
     # cand_backend = "numpy"
 
@@ -1354,3 +1381,799 @@ def test_Region_divergence_corner():
 #     def validation(field_in, field_out, *, domain, origin):
 #         # field_out[:, :-1, :] = field_in[:, 1:, :]
 #         field_out[:, 1:, :] = field_in[:, :-1, :]
+
+
+@pytest.mark.parametrize("cand_backend", INTERNAL_BACKENDS)
+def test_fill_corners(cand_backend):
+    @gtscript.function
+    def fill_corners_2cells_mult_x(
+        q: FloatField,
+        q_corner: FloatField,
+        sw_mult: float,
+        se_mult: float,
+        nw_mult: float,
+        ne_mult: float,
+    ):
+        """
+        Fills cell quantity q using corners from q_corner and multipliers in x-dir.
+        """
+        from __externals__ import i_end, i_start, j_end, j_start
+
+        # Southwest
+        with horizontal(region[i_start - 1, j_start - 1]):
+            q = sw_mult * q_corner[0, 1, 0]
+        with horizontal(region[i_start - 2, j_start - 1]):
+            q = sw_mult * q_corner[1, 2, 0]
+
+        # Southeast
+        with horizontal(region[i_end + 1, j_start - 1]):
+            q = se_mult * q_corner[0, 1, 0]
+        with horizontal(region[i_end + 2, j_start - 1]):
+            q = se_mult * q_corner[-1, 2, 0]
+
+        # Northwest
+        with horizontal(region[i_start - 1, j_end + 1]):
+            q = nw_mult * q_corner[0, -1, 0]
+        with horizontal(region[i_start - 2, j_end + 1]):
+            q = nw_mult * q_corner[1, -2, 0]
+
+        # Northeast
+        with horizontal(region[i_end + 1, j_end + 1]):
+            q = ne_mult * q_corner[0, -1, 0]
+        with horizontal(region[i_end + 2, j_end + 1]):
+            q = ne_mult * q_corner[-1, -2, 0]
+
+        return q
+
+    @gtscript.function
+    def fill_corners_3cells_mult_x(
+        q: FloatField,
+        q_corner: FloatField,
+        sw_mult: float,
+        se_mult: float,
+        nw_mult: float,
+        ne_mult: float,
+    ):
+        """
+        Fills cell quantity q using corners from q_corner and multipliers in x-dir.
+        """
+        from __externals__ import i_end, i_start, j_end, j_start
+
+        q = fill_corners_2cells_mult_x(q, q_corner, sw_mult, se_mult, nw_mult, ne_mult)
+
+        # Southwest
+        with horizontal(region[i_start - 3, j_start - 1]):
+            q = sw_mult * q_corner[2, 3, 0]
+
+        # Southeast
+        with horizontal(region[i_end + 3, j_start - 1]):
+            q = se_mult * q_corner[-2, 3, 0]
+            q = nw_mult * q_corner[2, -3, 0]
+
+        # Northwest
+        with horizontal(region[i_start - 3, j_end + 1]):
+            q = nw_mult * q_corner[2, -3, 0]
+
+        # Northeast
+        with horizontal(region[i_end + 3, j_end + 1]):
+            q = ne_mult * q_corner[-2, -3, 0]
+
+        return q
+
+    def fill_corners_x(utmp: FloatField, vtmp: FloatField, ua: FloatField, va: FloatField):
+        with computation(PARALLEL), interval(...):
+            utmp = fill_corners_3cells_mult_x(
+                utmp, vtmp, sw_mult=-1, se_mult=1, ne_mult=-1, nw_mult=1
+            )
+            # ua = fill_corners_2cells_mult_x(ua, va, sw_mult=-1, se_mult=1, ne_mult=-1, nw_mult=1)
+
+    # cand_backend = "gtc:dace"
+    # cand_backend = "gtc:dace"
+    # cand_backend = "numpy"
+
+    externals = {
+        "i_start": AxisIndex(axis=I, index=0, offset=3),
+        "local_is": AxisIndex(axis=I, index=0, offset=3),
+        "i_end": AxisIndex(axis=I, index=-1, offset=-3),
+        "local_ie": AxisIndex(axis=I, index=-1, offset=-3),
+        "j_start": AxisIndex(axis=J, index=0, offset=3),
+        "local_js": AxisIndex(axis=J, index=0, offset=3),
+        "j_end": AxisIndex(axis=J, index=-1, offset=-3),
+        "local_je": AxisIndex(axis=J, index=-1, offset=-3),
+    }
+
+    ref_stencil = gtscript.stencil(
+        definition=fill_corners_x, backend="numpy", rebuild=True, externals=externals
+    )
+    dace_stencil = gtscript.stencil(
+        definition=fill_corners_x, backend=cand_backend, rebuild=True, externals=externals
+    )
+
+    data1 = np.random.randn(N + 7, N + 7, NK)
+    data2 = np.random.randn(N + 7, N + 7, NK)
+    data3 = np.random.randn(N + 7, N + 7, NK)
+    data4 = np.random.randn(N + 7, N + 7, NK)
+    data5 = np.random.randn(N + 7, N + 7)
+    data6 = np.random.randn(N + 7, N + 7)
+    data7 = np.random.randn(N + 7, N + 7)
+    data8 = np.random.randn(N + 7, N + 7)
+    data9 = np.random.randn(N + 7, N + 7)
+    data10 = np.random.randn(N + 7, N + 7)
+    data11 = np.random.randn(N + 7, N + 7)
+    data12 = np.random.randn(N + 7, N + 7)
+    data13 = np.random.randn(N + 7, N + 7)
+    data14 = np.random.randn(N + 7, N + 7)
+    data15 = np.random.randn(N + 7, N + 7)
+    vtmp = gt4py.storage.from_array(
+        data=data1,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    va = gt4py.storage.from_array(
+        data=data2,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    # ua = gt4py.storage.from_array(
+    #     data=data3,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # va = gt4py.storage.from_array(
+    #     data=data4,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # dxc = gt4py.storage.from_array(
+    #     data=data5,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # dyc = gt4py.storage.from_array(
+    #     data=data6,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg1 = gt4py.storage.from_array(
+    #     data=data7,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg2 = gt4py.storage.from_array(
+    #     data=data8,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg3 = gt4py.storage.from_array(
+    #     data=data9,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg4 = gt4py.storage.from_array(
+    #     data=data10,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg1 = gt4py.storage.from_array(
+    #     data=data11,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg2 = gt4py.storage.from_array(
+    #     data=data12,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg3 = gt4py.storage.from_array(
+    #     data=data13,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg4 = gt4py.storage.from_array(
+    #     data=data14,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # rarea_c = gt4py.storage.from_array(
+    #     data=data15,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # tmp_qout_edges = gt4py.storage.from_array(
+    #     data=data1,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qx = gt4py.storage.from_array(
+    #     data=data2,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qy = gt4py.storage.from_array(
+    #     data=data3,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # # qx_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    # # qy_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    utmp_ref = gt4py.storage.zeros(
+        "numpy", default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+    ua_ref = gt4py.storage.zeros(
+        "numpy", default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+
+    # qx_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    # qy_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    utmp_cand = gt4py.storage.zeros(
+        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+    ua_cand = gt4py.storage.zeros(
+        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+
+    ref_stencil(
+        vtmp=vtmp,
+        va=va,
+        utmp=utmp_ref,
+        ua=ua_ref,
+        domain=(N, N, NK - 3),
+    )
+    dace_stencil(
+        vtmp=vtmp,
+        va=va,
+        utmp=utmp_cand,
+        ua=ua_cand,
+        domain=(N, N, NK - 3),
+    )
+
+    np.testing.assert_allclose(utmp_cand, utmp_ref)
+    np.testing.assert_allclose(ua_cand, ua_ref)
+    # np.testing.assert_allclose(qx_cand, qx_ref)
+    # np.testing.assert_allclose(qy_cand, qy_ref)
+
+
+@pytest.mark.parametrize("cand_backend", INTERNAL_BACKENDS)
+def test_Region_uc_contra_y_edge(cand_backend):
+    def uc_contra_y_edge(
+        uc: FloatField,
+        sin_sg1: FloatFieldIJ,
+        sin_sg3: FloatFieldIJ,
+        uc_contra: FloatField,
+    ):
+        from __externals__ import i_end, i_start
+
+        with computation(PARALLEL), interval(...):
+            with horizontal(region[i_start, :], region[i_end + 1, :]):
+                uc_contra = uc / sin_sg3[-1, 0]
+
+    # cand_backend = "gtc:dace"
+    # cand_backend = "gtc:gt:cpu_ifirst"
+    # cand_backend = "numpy"
+
+    externals = {
+        "i_start": AxisIndex(axis=I, index=0, offset=3),
+        "local_is": AxisIndex(axis=I, index=0, offset=3),
+        "i_end": AxisIndex(axis=I, index=-1, offset=-3),
+        "local_ie": AxisIndex(axis=I, index=-1, offset=-3),
+        "j_start": AxisIndex(axis=J, index=0, offset=3),
+        "local_js": AxisIndex(axis=J, index=0, offset=3),
+        "j_end": AxisIndex(axis=J, index=-1, offset=-3),
+        "local_je": AxisIndex(axis=J, index=-1, offset=-3),
+    }
+
+    ref_stencil = gtscript.stencil(
+        definition=uc_contra_y_edge, backend="numpy", rebuild=True, externals=externals
+    )
+    dace_stencil = gtscript.stencil(
+        definition=uc_contra_y_edge, backend=cand_backend, rebuild=True, externals=externals
+    )
+
+    data1 = np.random.randn(N + 7, N + 7, NK)
+    # data2 = np.random.randn(N + 7, N + 7, NK)
+    # data3 = np.random.randn(N + 7, N + 7, NK)
+    # data4 = np.random.randn(N + 7, N + 7, NK)
+    # data5 = np.random.randn(N + 7, N + 7)
+    # data6 = np.random.randn(N + 7, N + 7)
+    data7 = np.random.randn(N + 7, N + 7)
+    # data8 = np.random.randn(N + 7, N + 7)
+    data9 = np.random.randn(N + 7, N + 7)
+    # data10 = np.random.randn(N + 7, N + 7)
+    # data11 = np.random.randn(N + 7, N + 7)
+    # data12 = np.random.randn(N + 7, N + 7)
+    # data13 = np.random.randn(N + 7, N + 7)
+    # data14 = np.random.randn(N + 7, N + 7)
+    # data15 = np.random.randn(N + 7, N + 7)
+    uc = gt4py.storage.from_array(
+        data=data1,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    # va = gt4py.storage.from_array(
+    #     data=data2,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # ua = gt4py.storage.from_array(
+    #     data=data3,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # va = gt4py.storage.from_array(
+    #     data=data4,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # dxc = gt4py.storage.from_array(
+    #     data=data5,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # dyc = gt4py.storage.from_array(
+    #     data=data6,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    sin_sg1 = gt4py.storage.from_array(
+        data=data7,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    # sin_sg2 = gt4py.storage.from_array(
+    #     data=data8,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    sin_sg3 = gt4py.storage.from_array(
+        data=data9,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7),
+        mask=[True, True, False],
+        dtype=np.float64,
+    )
+    # sin_sg4 = gt4py.storage.from_array(
+    #     data=data10,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg1 = gt4py.storage.from_array(
+    #     data=data11,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg2 = gt4py.storage.from_array(
+    #     data=data12,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg3 = gt4py.storage.from_array(
+    #     data=data13,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg4 = gt4py.storage.from_array(
+    #     data=data14,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # rarea_c = gt4py.storage.from_array(
+    #     data=data15,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # tmp_qout_edges = gt4py.storage.from_array(
+    #     data=data1,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qx = gt4py.storage.from_array(
+    #     data=data2,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qy = gt4py.storage.from_array(
+    #     data=data3,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # # qx_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    # # qy_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    uc_contra_ref = gt4py.storage.zeros(
+        "numpy", default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+    # ua_ref = gt4py.storage.zeros(
+    #     "numpy", default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+
+    # qx_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    # qy_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    uc_contra_cand = gt4py.storage.zeros(
+        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+    # ua_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+
+    ref_stencil(
+        uc=uc,
+        sin_sg1=sin_sg1,
+        sin_sg3=sin_sg3,
+        uc_contra=uc_contra_ref,
+        domain=(N, N, NK - 3),
+    )
+    dace_stencil(
+        uc=uc,
+        sin_sg1=sin_sg1,
+        sin_sg3=sin_sg3,
+        uc_contra=uc_contra_cand,
+        domain=(N, N, NK - 3),
+    )
+
+    np.testing.assert_allclose(uc_contra_cand, uc_contra_ref)
+    # np.testing.assert_allclose(ua_cand, ua_ref)
+    # np.testing.assert_allclose(qx_cand, qx_ref)
+    # np.testing.assert_allclose(qy_cand, qy_ref)
+
+
+@pytest.mark.parametrize("cand_backend", INTERNAL_BACKENDS)
+def test_avg_box(cand_backend):
+    @gtscript.stencil(
+        backend=cand_backend,
+    )
+    def avg_box(u: FloatField, v: FloatField, utmp: FloatField, vtmp: FloatField):
+        with computation(PARALLEL), interval(...):
+            with horizontal(
+                region[:, :],
+            ):
+                utmp = 0.5 * (u + u[0, 1, 0])
+                # vtmp = 0.5 * (v + v[1, 0, 0])
+
+
+@pytest.mark.parametrize("cand_backend", INTERNAL_BACKENDS)
+def test_Region_a2b_interpolation(cand_backend):
+    def a2b_interpolation(
+        tmp_qout_edges: FloatField,
+        qout: FloatField,
+        qx: FloatField,
+        qy: FloatField,
+    ):
+        from __externals__ import i_end, i_start, j_end, j_start
+
+        with computation(PARALLEL), interval(...):
+            qxx = a2 * (qx[0, -2, 0] + qx[0, 1, 0]) + a1 * (qx[0, -1, 0] + qx)
+            qyy = a2 * (qy[-2, 0, 0] + qy[1, 0, 0]) + a1 * (qy[-1, 0, 0] + qy)
+            # TODO(rheag) use a function with an offset when that works consistently
+            with horizontal(region[:, j_start + 1]):
+                qxx_upper = a2 * (qx[0, -1, 0] + qx[0, 2, 0]) + a1 * (qx + qx[0, 1, 0])
+                qxx = c1 * (qx[0, -1, 0] + qx) + c2 * (tmp_qout_edges[0, -1, 0] + qxx_upper)
+            with horizontal(region[:, j_end]):
+                qxx_lower = a2 * (qx[0, -3, 0] + qx) + a1 * (qx[0, -2, 0] + qx[0, -1, 0])
+                qxx = c1 * (qx[0, -1, 0] + qx) + c2 * (tmp_qout_edges[0, 1, 0] + qxx_lower)
+            with horizontal(region[i_start + 1, :]):
+                qyy_right = a2 * (qy[-1, 0, 0] + qy[2, 0, 0]) + a1 * (qy + qy[1, 0, 0])
+                qyy = c1 * (qy[-1, 0, 0] + qy) + c2 * (tmp_qout_edges[-1, 0, 0] + qyy_right)
+            with horizontal(region[i_end, :]):
+                qyy_left = a2 * (qy[-3, 0, 0] + qy) + a1 * (qy[-2, 0, 0] + qy[-1, 0, 0])
+                qyy = c1 * (qy[-1, 0, 0] + qy) + c2 * (tmp_qout_edges[1, 0, 0] + qyy_left)
+            qout = 0.5 * (qxx + qyy)
+
+    # cand_backend = "gtc:dace"
+    cand_backend = "gtc:gt:cpu_ifirst"
+    # cand_backend = "numpy"
+
+    externals = {
+        "i_start": AxisIndex(axis=I, index=0, offset=-1),
+        "local_is": AxisIndex(axis=I, index=0, offset=-1),
+        "i_end": AxisIndex(axis=I, index=-1, offset=0),
+        "local_ie": AxisIndex(axis=I, index=-1, offset=0),
+        "j_start": AxisIndex(axis=J, index=0, offset=-1),
+        "local_js": AxisIndex(axis=J, index=0, offset=-1),
+        "j_end": AxisIndex(axis=J, index=-1, offset=0),
+        "local_je": AxisIndex(axis=J, index=-1, offset=0),
+    }
+
+    ref_stencil = gtscript.stencil(
+        definition=a2b_interpolation, backend="numpy", rebuild=True, externals=externals
+    )
+    dace_stencil = gtscript.stencil(
+        definition=a2b_interpolation, backend=cand_backend, rebuild=True, externals=externals
+    )
+
+    data1 = np.random.randn(N + 7, N + 7, NK)
+    data2 = np.random.randn(N + 7, N + 7, NK)
+    data3 = np.random.randn(N + 7, N + 7, NK)
+    data4 = np.random.randn(N + 7, N + 7, NK)
+    data5 = np.random.randn(N + 7, N + 7)
+    data6 = np.random.randn(N + 7, N + 7)
+    data7 = np.random.randn(N + 7, N + 7)
+    data8 = np.random.randn(N + 7, N + 7)
+    data9 = np.random.randn(N + 7, N + 7)
+    data10 = np.random.randn(N + 7, N + 7)
+    data11 = np.random.randn(N + 7, N + 7)
+    data12 = np.random.randn(N + 7, N + 7)
+    data13 = np.random.randn(N + 7, N + 7)
+    data14 = np.random.randn(N + 7, N + 7)
+    data15 = np.random.randn(N + 7, N + 7)
+    # tmp_qout_edges = gt4py.storage.from_array(
+    #     data=data1,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qx = gt4py.storage.from_array(
+    #     data=data2,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # qy = gt4py.storage.from_array(
+    #     data=data3,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # va = gt4py.storage.from_array(
+    #     data=data4,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7, NK),
+    #     dtype=np.float64,
+    # )
+    # dxc = gt4py.storage.from_array(
+    #     data=data5,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # dyc = gt4py.storage.from_array(
+    #     data=data6,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg1 = gt4py.storage.from_array(
+    #     data=data7,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg2 = gt4py.storage.from_array(
+    #     data=data8,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg3 = gt4py.storage.from_array(
+    #     data=data9,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # sin_sg4 = gt4py.storage.from_array(
+    #     data=data10,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg1 = gt4py.storage.from_array(
+    #     data=data11,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg2 = gt4py.storage.from_array(
+    #     data=data12,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg3 = gt4py.storage.from_array(
+    #     data=data13,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # cos_sg4 = gt4py.storage.from_array(
+    #     data=data14,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    # rarea_c = gt4py.storage.from_array(
+    #     data=data15,
+    #     backend=cand_backend,
+    #     default_origin=(3, 3, 3),
+    #     shape=(N + 7, N + 7),
+    #     mask=[True, True, False],
+    #     dtype=np.float64,
+    # )
+    tmp_qout_edges = gt4py.storage.from_array(
+        data=data1,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    qx = gt4py.storage.from_array(
+        data=data2,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    qy = gt4py.storage.from_array(
+        data=data3,
+        backend=cand_backend,
+        default_origin=(3, 3, 3),
+        shape=(N + 7, N + 7, NK),
+        dtype=np.float64,
+    )
+    # # qx_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    # # qy_ref = gt4py.storage.zeros(
+    # #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # # )
+    qout_ref = gt4py.storage.ones(
+        "numpy", default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+
+    # qx_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    # qy_cand = gt4py.storage.zeros(
+    #     cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    # )
+    qout_cand = gt4py.storage.ones(
+        cand_backend, default_origin=(3, 3, 3), shape=(N + 7, N + 7, NK), dtype=np.float64
+    )
+
+    ref_stencil(
+        tmp_qout_edges=tmp_qout_edges,
+        qout=qout_ref,
+        qx=qx,
+        qy=qy,
+        domain=(N, N, NK - 3),
+    )
+    dace_stencil(
+        tmp_qout_edges=tmp_qout_edges,
+        qout=qout_cand,
+        qx=qx,
+        qy=qy,
+        domain=(N, N, NK - 3),
+    )
+
+    np.testing.assert_allclose(qout_cand, qout_ref)
+    # np.testing.assert_allclose(qx_cand, qx_ref)
+    # np.testing.assert_allclose(qy_cand, qy_ref)
