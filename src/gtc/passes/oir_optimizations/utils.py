@@ -83,10 +83,13 @@ class AccessCollector(NodeVisitor):
 
     def visit_MaskStmt(self, node: oir.MaskStmt, **kwargs: Any) -> None:
 
-        region = node.mask if isinstance(node.mask, oir.HorizontalMask) else None
-
         self.visit(node.mask, is_write=False, **kwargs)
-        self.visit(node.body, in_mask=True, region=region, **kwargs)
+        regions = node.mask.iter_tree().if_isinstance(oir.HorizontalMask).to_list()
+        if regions:
+            for region in regions:
+                self.visit(node.body, in_mask=True, region=region, **kwargs)
+        else:
+            self.visit(node.body, in_mask=True, region=None, **kwargs)
 
     def visit_While(self, node: oir.While, **kwargs: Any) -> None:
         self.visit(node.cond, is_write=False, **kwargs)

@@ -87,11 +87,12 @@ def iteration_space_compatible(
     if left.iteration_space == right.iteration_space:
         return True
 
-    for conn_name in set(left.out_connectors) | set(right.out_connectors):
-        name = conn_name[len("OUT_") :]
-        if name in api_fields:
-            return False
-    return True
+    return False
+    # for conn_name in set(left.out_connectors) | set(right.out_connectors):
+    #     name = conn_name[len("OUT_") :]
+    #     if name in api_fields:
+    #         return False
+    # return True
 
 
 def unwire_access_node(

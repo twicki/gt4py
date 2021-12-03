@@ -16,13 +16,38 @@ def _iter_assigns(node: gtir.Stencil) -> XIterable[gtir.ParAssignStmt]:
     return node.iter_tree().if_isinstance(gtir.ParAssignStmt)
 
 
-def _ext_from_off(offset: gtir.CartesianOffset, allow_negative: bool = False) -> Extent:
-    if allow_negative:
-        return Extent.from_offset((offset.i, offset.j, 0))
-    else:
-        return Extent(
-            ((min(offset.i, 0), max(offset.i, 0)), (min(offset.j, 0), max(offset.j, 0)), (0, 0))
+def _ext_from_off(
+    offset: gtir.CartesianOffset,
+    region: Optional[gtir.HorizontalMask],
+    left_extent: Extent,
+    allow_negative: bool = False,
+) -> Extent:
+
+    res = Extent.from_offset((offset.i, offset.j, 0))
+
+    if region is not None:
+        res_ext = []
+        for ext, interval, left_ext in zip(res, (region.i, region.j), left_extent):
+            dim_ext = list(ext)
+            if interval.start is not None:
+                if interval.start.level == common.LevelMarker.START:
+                    dim_ext[0] += interval.start.offset - left_ext[0]
+                else:
+                    dim_ext[0] = 0
+            if interval.end is not None:
+                if interval.end.level == common.LevelMarker.END:
+                    dim_ext[1] += interval.end.offset - left_ext[1]
+                else:
+                    dim_ext[1] = 0
+            res_ext.append(tuple(dim_ext))
+        res_ext.append((0, 0))
+        res = Extent(tuple(res_ext))
+
+    if not allow_negative:
+        res = Extent(
+            ((min(res[0][0], 0), max(res[0][1], 0)), (min(res[1][0], 0), max(res[1][1], 0)), (0, 0))
         )
+    return res
 
 
 FIELD_EXT_T = Dict[str, Extent]
@@ -114,39 +139,46 @@ class LegacyExtentsVisitor(NodeVisitor):
         region: Optional[gtir.HorizontalRegion] = None,
         **kwargs: Any,
     ) -> None:
-        if self._allow_negative:
-            if region is not None:
-                res_extent = []
-                for off, interval in zip((node.offset.i, node.offset.j), (region.i, region.j)):
-                    interval = common.HorizontalInterval(start=interval.start, end=interval.end)
-                    ext = [0, 0]
-                    if interval.start is None:
-                        ext[0] = off
-                    elif interval.start.level == common.LevelMarker.START:
-                        ext[0] = min(off, off + interval.start.offset)
-                    else:
-                        ext[0] = 0
-                    if interval.end is None:
-                        ext[1] = off
-                    elif interval.end.level == common.LevelMarker.END:
-                        ext[1] = max(off, off + interval.end.offset)
-                    else:
-                        ext[1] = 0
+        if region is not None:
+            res_extent = []
+            for off, interval, left_extent in zip(
+                (node.offset.i, node.offset.j), (region.i, region.j), pa_ctx.left_extent
+            ):
+                interval = common.HorizontalInterval(start=interval.start, end=interval.end)
+                ext = [0, 0]
 
-                    res_extent.append(ext)
-                res_extent.append((0, 0))
-                default_extent = Extent(res_extent)
-            else:
-                default_extent = Extent.from_offset((node.offset.i, node.offset.j, 0))
+                if interval.start is None:
+                    ext[0] = off
+                elif interval.start.level == common.LevelMarker.START:
+                    ext[0] = max(off, off + interval.start.offset + left_extent[0])
+                else:
+                    ext[0] = 0
+
+                if interval.end is None:
+                    ext[1] = off
+                elif interval.end.level == common.LevelMarker.END:
+                    ext[1] = min(off, off + interval.end.offset + left_extent[1])
+                else:
+                    ext[1] = 0
+
+                res_extent.append(ext)
+            res_extent.append((0, 0))
+            default_extent = Extent(res_extent)
         else:
-            default_extent = Extent.zeros()
+            default_extent = Extent.from_offset((node.offset.i, node.offset.j, 0))
+        if not self._allow_negative:
+            clipped_extent = tuple((min(0, de[0]), max(0, de[1])) for de in default_extent)
+            default_extent = Extent(clipped_extent)
 
         pa_ctx.assign_extents.setdefault(
             node.name, field_extents.setdefault(node.name, default_extent)
         )
 
         pa_ctx.assign_extents[node.name] |= pa_ctx.left_extent + _ext_from_off(
-            node.offset, allow_negative=self._allow_negative
+            node.offset,
+            region=region,
+            allow_negative=self._allow_negative,
+            left_extent=pa_ctx.left_extent,
         )
 
 

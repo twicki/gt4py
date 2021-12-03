@@ -243,7 +243,6 @@ class OIRLibraryNodeExpander:
                 self.context_subsets[name] = edge.data.subset
         self.origins = self.get_origins(compensate_regions=False)
         self.compensated_origins = self.get_origins(compensate_regions=True)
-        # self.compensated_origins = self.get_origins(compensate_regions=False)
         self.fix_context_memlets = fix_context_memlets
 
     def get_origins(self, compensate_regions=False):
@@ -572,16 +571,27 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
         origins = dict()
         for acc in access_collection.ordered_accesses():
-            if acc.region is not None:
+            if compensate_regions and acc.region is not None:
                 offset = []
-                for dim, interval in enumerate((acc.region.i, acc.region.j)):
+                iteration_space = self.node.iteration_space
+                for dim, interval, iteration_interval in zip(
+                    (0, 1),
+                    (acc.region.i, acc.region.j),
+                    (iteration_space.i_interval, iteration_space.j_interval),
+                ):
                     if interval.start is None:
-                        offset.append(acc.offset[dim])
+                        offset.append(min(acc.offset[dim], 0))
                     elif interval.start.level == common.LevelMarker.START:
                         if acc.offset[dim] > 0:
-                            offset.append(acc.offset[dim])
+                            offset.append(0)
                         else:
-                            offset.append(min(acc.offset[dim] + interval.start.offset, 0))
+                            lowest_gridpoint = max(
+                                interval.start.offset, iteration_interval.start.offset
+                            )
+                            off = acc.offset[dim] + (
+                                lowest_gridpoint - iteration_interval.start.offset
+                            )
+                            offset.append(min(0, off))
                     else:
                         # if acc.offset[dim] < 0:
                         offset.append(0)
@@ -613,16 +623,13 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
         for name, offsets in access_collection.read_offsets().items():
             dimensions = array_dimensions(self.parent_sdfg.arrays[name])
             data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
+            origin = self.compensated_origins[name]
 
             for offset in offsets:
                 subset_strs = []
                 for dim, var in enumerate("ij0"):
                     if not dimensions[dim]:
                         continue
-                    if offset[dim] < 0:
-                        origin = self.compensated_origins[name]
-                    else:
-                        origin = self.compensated_origins[name]
                     off = origin[dim] + offset[dim]
                     subset_strs.append(f"{var}{off:+d}")
                 subset_strs.extend(f"0:{dim}" for dim in data_dims)

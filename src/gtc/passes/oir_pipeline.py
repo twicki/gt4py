@@ -83,7 +83,7 @@ class DefaultPipeline(OirPipeline):
             AdjacentLoopMerging,
             LocalTemporariesToScalars,
             WriteBeforeReadTemporariesToScalars,
-            OnTheFlyMerging,
+            # OnTheFlyMerging,
             MaskStmtMerging,
             MaskInlining,
             NoFieldAccessPruning,

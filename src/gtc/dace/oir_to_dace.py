@@ -134,7 +134,7 @@ class BaseOirSDFGBuilder(ABC):
                     res._ordered_accesses.extend(collection._ordered_accesses)
             return res
         elif isinstance(node, HorizontalExecutionLibraryNode):
-            if (True, id(node.oir_node)) not in self._access_collection_cache:
+            if id(node.oir_node) not in self._access_collection_cache:
                 self._access_collection_cache[id(node.oir_node)] = AccessCollector.apply(
                     node.oir_node
                 )
@@ -383,7 +383,11 @@ class BaseOirSDFGBuilder(ABC):
         for n in reversed(nodes):
             builder.add_write_after_read_edges(n)
         res = builder._get_sdfg()
-        res.validate()
+        try:
+            res.validate()
+        except dace.sdfg.validation.InvalidSDFGEdgeError:
+            res.view()
+            raise
         return res
 
 
@@ -463,19 +467,14 @@ class VerticalLoopSectionOirSDFGBuilder(BaseOirSDFGBuilder):
         assert iteration_space is not None
         collection = self._get_access_collection(node)
 
-        access_spaces: Dict[str, CartesianIJIndexSpace] = dict()
         for acc in collection.read_accesses():
-            access_spaces.setdefault(acc.field, CartesianIJIndexSpace.from_access(acc))
-            access_spaces[acc.field] |= CartesianIJIndexSpace.from_access(acc)
-        for k, v in access_spaces.items():
-            input_spaces[k] = v.compose(iteration_space)
-
-        access_spaces = dict()
+            extended = CartesianIJIndexSpace.from_iteration_space(iteration_space).extended(acc)
+            input_spaces.setdefault(acc.field, extended)
+            input_spaces[acc.field] |= extended
         for acc in collection.write_accesses():
-            access_spaces.setdefault(acc.field, CartesianIJIndexSpace.from_access(acc))
-            access_spaces[acc.field] |= CartesianIJIndexSpace.from_access(acc)
-        for k, v in access_spaces.items():
-            output_spaces[k] = v.compose(iteration_space)
+            extended = CartesianIJIndexSpace.from_iteration_space(iteration_space).extended(acc)
+            output_spaces.setdefault(acc.field, extended)
+            output_spaces[acc.field] |= extended
 
         return input_spaces, output_spaces
 
@@ -587,17 +586,18 @@ class StencilOirSDFGBuilder(BaseOirSDFGBuilder):
                 assert iteration_space is not None
                 collection = self._get_access_collection(n)
                 for acc in collection.read_accesses():
-                    access_space = CartesianIJIndexSpace.from_access(acc)
-                    if acc.field not in input_spaces:
-                        input_spaces[acc.field] = access_space.compose(iteration_space)
-                    else:
-                        input_spaces[acc.field] |= access_space.compose(iteration_space)
+                    extended = CartesianIJIndexSpace.from_iteration_space(iteration_space).extended(
+                        acc
+                    )
+                    input_spaces.setdefault(acc.field, extended)
+                    input_spaces[acc.field] |= extended
+
                 for acc in collection.write_accesses():
-                    access_space = CartesianIJIndexSpace.from_access(acc)
-                    if acc.field not in output_spaces:
-                        output_spaces[acc.field] = access_space.compose(iteration_space)
-                    else:
-                        output_spaces[acc.field] |= access_space.compose(iteration_space)
+                    extended = CartesianIJIndexSpace.from_iteration_space(iteration_space).extended(
+                        acc
+                    )
+                    output_spaces.setdefault(acc.field, extended)
+                    output_spaces[acc.field] |= extended
         return input_spaces, output_spaces
 
     def _get_collection_from_sections(self, sections):

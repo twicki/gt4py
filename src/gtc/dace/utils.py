@@ -27,9 +27,10 @@ from pydantic import validator
 import eve
 import gtc.oir as oir
 from eve.iterators import TraversalOrder, iter_tree
-from gtc.common import CartesianOffset, DataType, ExprKind, LevelMarker, typestr_to_data_type
-from gtc.passes.oir_optimizations.utils import AccessCollector, Access
 from gtc import common
+from gtc.common import CartesianOffset, DataType, ExprKind, LevelMarker, typestr_to_data_type
+from gtc.passes.oir_optimizations.utils import Access, AccessCollector
+
 
 if TYPE_CHECKING:
     from gtc.dace.nodes import HorizontalExecutionLibraryNode, VerticalLoopLibraryNode
@@ -439,6 +440,38 @@ class CartesianIJIndexSpace(tuple):
             )
         )
 
+    def extended(self, access: Access):
+        if access.region is None:
+            return CartesianIJIndexSpace.from_access(access).compose(self)
+
+        res = []
+
+        for region_interval, index_interval, off in zip(
+            (access.region.i, access.region.j),
+            self,
+            access.offset[:2],
+        ):
+            dim_tuple = list(index_interval)
+
+            if region_interval.start is not None:
+                if region_interval.start.level == common.LevelMarker.START:
+                    offset = region_interval.start.offset - index_interval[0]
+                    dim_tuple[0] += min(0, off + offset)
+            else:
+                dim_tuple[0] += min(0, off)
+
+            if region_interval.end is not None:
+                if region_interval.end.level == common.LevelMarker.END:
+
+                    offset = region_interval.end.offset - index_interval[1]
+                    dim_tuple[1] += max(0, off + offset)
+            else:
+                dim_tuple[1] += min(0, off)
+
+            res.append(tuple(dim_tuple))
+
+        return CartesianIJIndexSpace(res)
+
 
 def oir_iteration_space_computation(stencil: oir.Stencil) -> Dict[int, CartesianIterationSpace]:
     iteration_spaces = dict()
@@ -569,24 +602,35 @@ def nodes_extent_calculation(
                         (iteration_space.i_interval, iteration_space.j_interval),
                     ):
                         ext = [0, 0]
+                        #
+                        # ext[0] = iteration_interval.start.offset
+                        # if region_interval.start is not None:
+                        #     if region_interval.start.level == common.LevelMarker.START:
+                        #         ext[0] += acc.offset[dim] + region_interval.start.offset
+                        # else:
+                        #     ext[0] += acc.offset[dim]
+                        # ext[0] = min(0, ext[0])
 
-                        # offset is already compensated
                         ext[0] = iteration_interval.start.offset
                         if region_interval.start is not None:
                             if region_interval.start.level == common.LevelMarker.START:
-                                ext[0] += acc.offset[dim] + region_interval.start.offset
+                                offset = (
+                                    region_interval.start.offset - iteration_interval.start.offset
+                                )
+                                ext[0] += acc.offset[dim] + offset
                         else:
                             ext[0] += acc.offset[dim]
                         ext[0] = min(0, ext[0])
 
-                        # offset is already compensated
                         ext[1] = iteration_interval.end.offset
                         if region_interval.end is not None:
                             if region_interval.end.level == common.LevelMarker.END:
-                                ext[1] += acc.offset[dim] + region_interval.end.offset
+                                offset = region_interval.end.offset - iteration_interval.end.offset
+                                ext[1] += acc.offset[dim] + offset
                         else:
                             ext[1] += acc.offset[dim]
                         ext[1] = max(0, ext[1])
+
                         access_extent.append(tuple(ext))
 
                 if acc.field not in access_spaces:

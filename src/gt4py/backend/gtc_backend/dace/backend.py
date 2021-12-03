@@ -45,10 +45,10 @@ from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 from gtc.passes.oir_optimizations.inlining import MaskInlining
 from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
 from gtc.passes.oir_pipeline import DefaultPipeline
-from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 
 
 if TYPE_CHECKING:
@@ -136,9 +136,10 @@ def expand_and_wrap_sdfg(
         if info is None:
             continue
         extent = [e for e, a in zip(extents[name], "IJK") if a in args_data.field_info[name].axes]
-        shape = [
-            s + abs(max(el, 0)) for s, (el, _) in zip(inner_sdfg.arrays[name].shape, extent)
-        ] + [str(d) for d in args_data.field_info[name].data_dims]
+        shape = inner_sdfg.arrays[name].shape
+        # shape = [
+        #     s + abs(max(el, 0)) for s, (el, _) in zip(inner_sdfg.arrays[name].shape, extent)
+        # ] + [str(d) for d in args_data.field_info[name].data_dims]
         wrapper_sdfg.add_array(
             name,
             strides=inner_sdfg.arrays[name].strides,
@@ -147,13 +148,14 @@ def expand_and_wrap_sdfg(
             storage=inner_sdfg.arrays[name].storage,
         )
 
-        subset_strs[name] = ",".join(
-            [
-                f"{max(e[0], 0)}:{max(e[0], 0) + s}"
-                for e, s in zip(extent, inner_sdfg.arrays[name].shape)
-            ]
-            + [f"0:{d}" for d in args_data.field_info[name].data_dims]
-        )
+        # subset_strs[name] = ",".join(
+        #     [
+        #         f"{max(e[0], 0)}:{max(e[0], 0) + s}"
+        #         for e, s in zip(extent, inner_sdfg.arrays[name].shape)
+        #     ]
+        #     + [f"0:{d}" for d in args_data.field_info[name].data_dims]
+        # )
+        subset_strs[name] = ",".join(f"0:{s}" for s in inner_sdfg.arrays[name].shape)
     for name in inputs:
         wrapper_state.add_edge(
             wrapper_state.add_read(name),
@@ -222,7 +224,9 @@ class GTCDaCeExtGenerator:
         oir = self.backend.builder.options.backend_opts.get("oir_pipeline", default_pipeline).run(
             base_oir
         )
+
         sdfg = OirSDFGBuilder().visit(oir)
+
         # sdfg.view()
         # for nsdfg in (
         #     n for n, _ in sdfg.all_nodes_recursive() if isinstance(n, dace.nodes.LibraryNode)
@@ -237,7 +241,7 @@ class GTCDaCeExtGenerator:
         for tmp_sdfg in sdfg.all_sdfgs_recursive():
             tmp_sdfg.transformation_hist = []
             tmp_sdfg.orig_sdfg = None
-        # sdfg.view()
+
         sdfg.save(
             self.backend.builder.module_path.joinpath(
                 os.path.dirname(self.backend.builder.module_path),
