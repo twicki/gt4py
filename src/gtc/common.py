@@ -324,6 +324,9 @@ class CartesianOffset(Node):
     def is_zero(self) -> bool:
         return all(x == 0 for x in self.to_dict().values())
 
+    def to_tuple(self) -> Tuple[int, int, int]:
+        return self.i, self.j, self.k
+
 
 class VariableOffset(CartesianOffset):
     k: Expr
