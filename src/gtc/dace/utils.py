@@ -541,7 +541,7 @@ def get_access_collection(
 
     if isinstance(node, dace.SDFG):
         res = AccessCollector.Result([])
-        for node in node.states()[0].nodes():
+        for node, _ in node.all_nodes_recursive():
             if isinstance(node, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
                 collection = get_access_collection(node)
                 res._ordered_accesses.extend(collection._ordered_accesses)

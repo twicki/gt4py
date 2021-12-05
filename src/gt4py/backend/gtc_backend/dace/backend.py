@@ -45,9 +45,6 @@ from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
-from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
-from gtc.passes.oir_optimizations.inlining import MaskInlining
-from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
 from gtc.passes.oir_pipeline import DefaultPipeline
 
 
@@ -92,6 +89,11 @@ def to_device(sdfg: dace.SDFG, device):
                     for node, _ in section.all_nodes_recursive():
                         if isinstance(node, HorizontalExecutionLibraryNode):
                             node.map_schedule = dace.ScheduleType.GPU_ThreadBlock
+    else:
+        for node, _ in sdfg.all_nodes_recursive():
+            if isinstance(node, VerticalLoopLibraryNode):
+                node.implementation = "block"
+                node.tile_sizes = [2, 2]
 
 
 def expand_and_wrap_sdfg(
@@ -112,8 +114,7 @@ def expand_and_wrap_sdfg(
     inner_sdfg = dace.SDFG.from_json(inner_sdfg.to_json())
 
     inner_sdfg.expand_library_nodes(recursive=True)
-    # inner_sdfg.view()
-    # post_expand_trafos(inner_sdfg)
+    post_expand_trafos(inner_sdfg)
 
     extents = compute_legacy_extents(gtir, allow_negative=True)
 
@@ -199,7 +200,6 @@ def expand_and_wrap_sdfg(
     # wrapper_sdfg.apply_transformations_repeated(
     #     [*strict_transformations(), MapCollapse, InlineTransients], strict=True
     # )
-    wrapper_sdfg.validate()
     # wrapper_sdfg.view()
     return wrapper_sdfg
 
@@ -213,10 +213,7 @@ class GTCDaCeExtGenerator:
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
         default_pipeline = DefaultPipeline(
             skip=[
-                MaskStmtMerging,
-                MaskInlining,
                 FillFlushToLocalKCaches,
-                OnTheFlyMerging,
             ]
         )
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()

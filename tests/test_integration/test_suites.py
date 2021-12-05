@@ -902,19 +902,7 @@ class TestRegionNoExtendHighSingleIdx(gt_testing.StencilTestSuite):
                 ]
 
     def validation(field_in, field_out, *, domain, origin):
-        # @gtscript.stencil(backend="numpy")
-        # def ref_stencil(
-        #     field_in: gtscript.Field[np.float64], field_out: gtscript.Field[np.float64]
-        # ):
-        #     with computation(PARALLEL), interval(...):
-        #         field_out = field_in[  # noqa: F841  # Local name is assigned to but never used
-        #             0, 1, 0
-        #         ]
-
         field_out[:, -2, :] = field_in[:, -1, :]
-        # domain = (domain[0], domain[1]-1, domain[2])
-        # origin = {k: (orig[0], orig[1], orig[2]) for k, orig in origin.items()}
-        # ref_stencil(field_in, field_out, domain=domain, origin=origin)
 
 
 class TestRegionReadInsideLow(gt_testing.StencilTestSuite):
