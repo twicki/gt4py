@@ -602,14 +602,6 @@ def nodes_extent_calculation(
                         (iteration_space.i_interval, iteration_space.j_interval),
                     ):
                         ext = [0, 0]
-                        #
-                        # ext[0] = iteration_interval.start.offset
-                        # if region_interval.start is not None:
-                        #     if region_interval.start.level == common.LevelMarker.START:
-                        #         ext[0] += acc.offset[dim] + region_interval.start.offset
-                        # else:
-                        #     ext[0] += acc.offset[dim]
-                        # ext[0] = min(0, ext[0])
 
                         ext[0] = iteration_interval.start.offset
                         if region_interval.start is not None:

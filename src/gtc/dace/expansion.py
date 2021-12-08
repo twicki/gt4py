@@ -792,44 +792,6 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             schedule=self.node.map_schedule,
         )
 
-        # if there are OOB accesses, these are due to regions and can be clamped
-        for edge in self.res_state.in_edges(map_entry):
-            if not any(
-                meml.allow_oob for meml in in_memlets.values() if meml.data == edge.data.data
-            ):
-                continue
-            dims = array_dimensions(self.res_sdfg.arrays[edge.data.data])
-            if dims[0]:
-                res_range = list(edge.data.subset.ranges[0])
-                res_range[0] = max(0, res_range[0])
-                res_range[1] = min(self.res_sdfg.arrays[edge.data.data].shape[0] - 1, res_range[1])
-                edge.data.subset.ranges[0] = tuple(res_range)
-            if dims[1]:
-                res_range = list(edge.data.subset.ranges[int(dims[0])])
-                res_range[0] = max(0, res_range[0])
-                res_range[1] = min(
-                    self.res_sdfg.arrays[edge.data.data].shape[int(dims[0])] - 1, res_range[1]
-                )
-                edge.data.subset.ranges[int(dims[0])] = tuple(res_range)
-        # for edge in self.res_state.out_edges(map_exit):
-        #     if not any(meml.allow_oob for meml in in_memlets.values() if meml.data==edge.data.data):
-        #         continue
-        #     dims = array_dimensions(self.res_sdfg.arrays[edge.data.data])
-        #     if dims[0]:
-        #         res_range = list(edge.data.subset.ranges[0])
-        #         res_range[0] = max(0, res_range[0])
-        #         res_range[1] = min(
-        #             self.res_sdfg.arrays[edge.data.data].shape[0] - 1, res_range[1]
-        #         )
-        #         edge.data.subset.ranges[0] = tuple(res_range)
-        #     if dims[1]:
-        #         res_range = list(edge.data.subset.ranges[int(dims[0])])
-        #         res_range[0] = max(0, res_range[0])
-        #         res_range[1] = min(
-        #             self.res_sdfg.arrays[edge.data.data].shape[int(dims[0])] - 1, res_range[1]
-        #         )
-        #         edge.data.subset.ranges[int(dims[0])] = tuple(res_range)
-
 
 class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
 

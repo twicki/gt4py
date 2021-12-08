@@ -89,11 +89,6 @@ def to_device(sdfg: dace.SDFG, device):
                     for node, _ in section.all_nodes_recursive():
                         if isinstance(node, HorizontalExecutionLibraryNode):
                             node.map_schedule = dace.ScheduleType.GPU_ThreadBlock
-    else:
-        for node, _ in sdfg.all_nodes_recursive():
-            if isinstance(node, VerticalLoopLibraryNode):
-                node.implementation = "block"
-                node.tile_sizes = [2, 2]
 
 
 def expand_and_wrap_sdfg(
@@ -112,7 +107,6 @@ def expand_and_wrap_sdfg(
         if array.transient:
             array.lifetime = dace.AllocationLifetime.Persistent
     inner_sdfg = dace.SDFG.from_json(inner_sdfg.to_json())
-
     inner_sdfg.expand_library_nodes(recursive=True)
     post_expand_trafos(inner_sdfg)
 
@@ -136,11 +130,7 @@ def expand_and_wrap_sdfg(
     for name, info in args_data.field_info.items():
         if info is None:
             continue
-        extent = [e for e, a in zip(extents[name], "IJK") if a in args_data.field_info[name].axes]
         shape = inner_sdfg.arrays[name].shape
-        # shape = [
-        #     s + abs(max(el, 0)) for s, (el, _) in zip(inner_sdfg.arrays[name].shape, extent)
-        # ] + [str(d) for d in args_data.field_info[name].data_dims]
         wrapper_sdfg.add_array(
             name,
             strides=inner_sdfg.arrays[name].strides,
@@ -149,13 +139,6 @@ def expand_and_wrap_sdfg(
             storage=inner_sdfg.arrays[name].storage,
         )
 
-        # subset_strs[name] = ",".join(
-        #     [
-        #         f"{max(e[0], 0)}:{max(e[0], 0) + s}"
-        #         for e, s in zip(extent, inner_sdfg.arrays[name].shape)
-        #     ]
-        #     + [f"0:{d}" for d in args_data.field_info[name].data_dims]
-        # )
         subset_strs[name] = ",".join(f"0:{s}" for s in inner_sdfg.arrays[name].shape)
     for name in inputs:
         wrapper_state.add_edge(
@@ -188,19 +171,6 @@ def expand_and_wrap_sdfg(
         if info is not None and name not in wrapper_sdfg.symbols:
             wrapper_sdfg.add_symbol(name, nsdfg.sdfg.symbols[name])
 
-    # from dace.transformation.interstate import InlineTransients
-    #
-    # for state in wrapper_sdfg.states():
-    #     for nsdfg in state.nodes():
-    #         if not isinstance(nsdfg, dace.nodes.NestedSDFG):
-    #             continue
-    #         from dace.transformation.interstate import InlineSDFG
-    #
-    #         InlineSDFG.apply_to(wrapper_sdfg, _nested_sdfg=nsdfg, save=False)
-    # wrapper_sdfg.apply_transformations_repeated(
-    #     [*strict_transformations(), MapCollapse, InlineTransients], strict=True
-    # )
-    # wrapper_sdfg.view()
     return wrapper_sdfg
 
 
@@ -221,15 +191,7 @@ class GTCDaCeExtGenerator:
         oir = self.backend.builder.options.backend_opts.get("oir_pipeline", default_pipeline).run(
             base_oir
         )
-
         sdfg = OirSDFGBuilder().visit(oir)
-
-        # sdfg.view()
-        # for nsdfg in (
-        #     n for n, _ in sdfg.all_nodes_recursive() if isinstance(n, dace.nodes.LibraryNode)
-        # ):
-        #     for interval, section in nsdfg.sections:
-        #         section.view()
 
         to_device(sdfg, self.backend.storage_info["device"])
 

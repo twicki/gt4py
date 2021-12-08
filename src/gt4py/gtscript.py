@@ -585,25 +585,25 @@ class SDFGWrapper:
             if sdfg.parent_nsdfg_node is not None:
                 symmap = sdfg.parent_nsdfg_node.symbol_mapping
 
-                if '__I' in symmap:
-                    ival = symmap['__I']
-                    del symmap['__I']
-                if '__J' in symmap:
-                    jval = symmap['__J']
-                    del symmap['__J']
-                if '__K' in symmap:
-                    kval = symmap['__K']
-                    del symmap['__K']
+                if "__I" in symmap:
+                    ival = symmap["__I"]
+                    del symmap["__I"]
+                if "__J" in symmap:
+                    jval = symmap["__J"]
+                    del symmap["__J"]
+                if "__K" in symmap:
+                    kval = symmap["__K"]
+                    del symmap["__K"]
 
-            sdfg.replace('__I', ival)
-            if '__I' in sdfg.symbols:
-                sdfg.remove_symbol('__I')
-            sdfg.replace('__J', jval)
-            if '__J' in sdfg.symbols:
-                sdfg.remove_symbol('__J')
-            sdfg.replace('__K', kval)
-            if '__K' in sdfg.symbols:
-                sdfg.remove_symbol('__K')
+            sdfg.replace("__I", ival)
+            if "__I" in sdfg.symbols:
+                sdfg.remove_symbol("__I")
+            sdfg.replace("__J", jval)
+            if "__J" in sdfg.symbols:
+                sdfg.remove_symbol("__J")
+            sdfg.replace("__K", kval)
+            if "__K" in sdfg.symbols:
+                sdfg.remove_symbol("__K")
 
             for val in ival, jval, kval:
                 sym = dace.symbolic.pystr_to_symbolic(val)
