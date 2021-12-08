@@ -45,6 +45,7 @@ from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
+from gtc.passes.oir_optimizations.horizontal_execution_merging import GreedyMerging
 from gtc.passes.oir_pipeline import DefaultPipeline
 
 
@@ -89,6 +90,11 @@ def to_device(sdfg: dace.SDFG, device):
                     for node, _ in section.all_nodes_recursive():
                         if isinstance(node, HorizontalExecutionLibraryNode):
                             node.map_schedule = dace.ScheduleType.GPU_ThreadBlock
+    else:
+        for node, _ in sdfg.all_nodes_recursive():
+            if isinstance(node, VerticalLoopLibraryNode):
+                node.implementation = "block"
+                node.tile_sizes = [2, 2]
 
 
 def expand_and_wrap_sdfg(
@@ -183,6 +189,7 @@ class GTCDaCeExtGenerator:
     def __call__(self, definition_ir: StencilDefinition) -> Dict[str, Dict[str, str]]:
         default_pipeline = DefaultPipeline(
             skip=[
+                GreedyMerging,
                 FillFlushToLocalKCaches,
             ]
         )

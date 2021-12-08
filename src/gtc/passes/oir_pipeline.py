@@ -79,7 +79,7 @@ class DefaultPipeline(OirPipeline):
     def all_steps() -> Sequence[PASS_T]:
         return [
             graph_merge_horizontal_executions,
-            # GreedyMerging,
+            GreedyMerging,
             AdjacentLoopMerging,
             LocalTemporariesToScalars,
             WriteBeforeReadTemporariesToScalars,
