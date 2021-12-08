@@ -348,12 +348,12 @@ class OIRLibraryNodeExpander:
         res = self.fix_context_memlets_and_get_nsdfg()
 
         # inherit symbols from parent sdfg
-        res.symbol_mapping = {s: s for s in self.res_sdfg.free_symbols}
         for s in list(self.res_sdfg.free_symbols):
             # res_sdfg already contains symbols for domain and strides where type is always int.
             # The type of API parameters still needs to be set.
             if s not in self.res_sdfg.symbols:
                 self.res_sdfg.add_symbol(s, self.parent_sdfg.symbols.get(s, dace.int32))
+        res.symbol_mapping = {s: s for s in self.res_sdfg.free_symbols}
         return res
 
 
@@ -661,15 +661,8 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
     def get_innermost_memlets(self):
 
         access_collection: AccessCollector.Result = get_access_collection(self.node)
-        region_inputs = {
-            acc.field
-            for acc in access_collection.ordered_accesses()
-            if acc.region is not None and acc.is_read
-        }
-        region_outputs = {
-            acc.field
-            for acc in access_collection.ordered_accesses()
-            if acc.region is not None and acc.is_write
+        region_accesses = {
+            acc.field for acc in access_collection.ordered_accesses() if acc.region is not None
         }
         dynamic_accesses = {
             get_tasklet_symbol(acc.name, acc.offset.to_tuple(), is_target=False)
@@ -688,7 +681,7 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
         in_memlets = dict()
         for name, offsets in access_collection.read_offsets().items():
-            if name in region_inputs:
+            if name in region_accesses:
                 shape = [
                     edge
                     for edge in self.parent_state.in_edges(self.node)
@@ -717,7 +710,7 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
         out_memlets = dict()
         for name in access_collection.write_fields():
-            if name in region_outputs:
+            if name in region_accesses:
                 shape = [
                     edge
                     for edge in self.parent_state.out_edges(self.node)
@@ -763,14 +756,14 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             if name + "__" in in_memlets:
                 in_dims = list(dims)
                 shape = iter(in_memlets[name + "__"].subset.bounding_box_size())
-                flat_dims = [i for i, d in enumerate(in_dims) if d and bool(next(shape) == 1)]
+                flat_dims = [i for i, d in enumerate(in_dims) if d and True == (next(shape) == 1)]
                 for i in flat_dims:
                     in_dims[i] = False
                 nonflat_dimensions[f"{name}__"] = in_dims
             if "__" + name in out_memlets:
                 out_dims = list(dims)
                 shape = iter(out_memlets["__" + name].subset.bounding_box_size())
-                flat_dims = [i for i, d in enumerate(out_dims) if d and bool(next(shape) == 1)]
+                flat_dims = [i for i, d in enumerate(out_dims) if d and True == (next(shape) == 1)]
                 for i in flat_dims:
                     out_dims[i] = False
                 nonflat_dimensions[f"__{name}"] = out_dims
@@ -876,7 +869,7 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
                 irange[0] += dace.symbol("tile_i")
                 irange[1] = dace.symbolic.pystr_to_symbolic(irange[1]).replace(
                     dace.symbol("__I"),
-                    dace.symbolic.pystr_to_symbolic(f"min({tile_sizes[0]},__I-tile_i)"),
+                    dace.symbolic.pystr_to_symbolic(f"min(tile_i+({tile_sizes[0]}),__I)"),
                 )
                 subset.ranges[0] = tuple(irange)
             if dims[1]:
@@ -885,20 +878,25 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
                 jrange[0] += dace.symbol("tile_j")
                 jrange[1] = dace.symbolic.pystr_to_symbolic(jrange[1]).replace(
                     dace.symbol("__J"),
-                    dace.symbolic.pystr_to_symbolic(f"min({tile_sizes[1]},__J-tile_j)"),
+                    dace.symbolic.pystr_to_symbolic(f"min(tile_j+({tile_sizes[1]}),__J)"),
                 )
                 subset.ranges[1] = tuple(jrange)
         for name, subset in inner_subsets.items():
 
             array: dace.data.Array = nsdfg.sdfg.arrays[name]
             dims = array_dimensions(array)
-            ndims = len(array.shape) - sum(dims[:2])
             inner_subsets[name] = dace.subsets.Range(
-                subset.ranges + [(0, None, 1) for d in range(ndims)]
+                subset.ranges + [(0, s - 1, 1) for s in array.shape[sum(dims[:2]) :]]
             )
         return {k: str(v) for k, v in inner_subsets.items()}
 
     def device_map(self, nsdfg):
+
+        tile_i_sym = dace.symbol("tile_i", dtype=dace.int32)
+        tile_j_sym = dace.symbol("tile_j", dtype=dace.int32)
+        global_I_sym = dace.symbol("__global_I", dtype=dace.int32)
+        global_J_sym = dace.symbol("__global_J", dtype=dace.int32)
+
         self.res_state.add_node(nsdfg)
 
         nsdfg.sdfg.parent = self.res_state
@@ -961,11 +959,6 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
             f"min({tile_sizes[1]}, __J - tile_j )"
         )
 
-        nsdfg.symbol_mapping["__global_I"] = dace.symbolic.pystr_to_symbolic(f"__I")
-        nsdfg.symbol_mapping["__global_J"] = dace.symbolic.pystr_to_symbolic(f"__J")
-        nsdfg.symbol_mapping["tile_i"] = "tile_i"
-        nsdfg.symbol_mapping["tile_j"] = "tile_j"
-
         state: dace.SDFGState
         access_collection: AccessCollector.Result = get_access_collection(self.node)
         region_fields = {
@@ -996,27 +989,31 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
             else:
                 he_region_fields = set()
             if is_he_edge and edge.data.data not in he_region_fields:
-
-                irange = list(edge.data.subset.ranges[0])
-                irange[0] += dace.symbol("tile_i", dtype=dace.int32, positive=True)
-                irange[1] += dace.symbol("tile_i", dtype=dace.int32, positive=True)
-                edge.data.subset.ranges[0] = tuple(irange)
-                jrange = list(edge.data.subset.ranges[1])
-                jrange[0] += dace.symbol("tile_j", dtype=dace.int32, positive=True)
-                jrange[1] += dace.symbol("tile_j", dtype=dace.int32, positive=True)
-                edge.data.subset.ranges[1] = tuple(jrange)
+                dims = array_dimensions(self.res_sdfg.arrays[edge.data.data])
+                if dims[0]:
+                    irange = list(edge.data.subset.ranges[0])
+                    irange[0] += tile_i_sym
+                    irange[1] += tile_i_sym
+                    edge.data.subset.ranges[0] = tuple(irange)
+                if dims[1]:
+                    jrange = list(edge.data.subset.ranges[1 if dims[0] else 0])
+                    jrange[0] += tile_j_sym
+                    jrange[1] += tile_j_sym
+                    edge.data.subset.ranges[1 if dims[0] else 0] = tuple(jrange)
             else:
-                array = state.parent.arrays[edge.data.data]
                 edge.data.subset.replace(
                     {
-                        dace.symbol("__I"): dace.symbol("__global_I", positive=True),
-                        dace.symbol("__J"): dace.symbol("__global_J", positive=True),
+                        dace.symbol("__I"): global_I_sym,
+                        dace.symbol("__J"): global_J_sym,
                     }
                 )
+
+                array = state.parent.arrays[edge.data.data]
                 shape = list(dace.symbolic.pystr_to_symbolic(s) for s in array.shape)
-                for s in shape:
-                    s.replace(dace.symbol("__I"), dace.symbol("__global_I", positive=True))
-                    s.replace(dace.symbol("__J"), dace.symbol("__global_J", positive=True))
+                for i, s in enumerate(shape):
+                    s = s.replace(dace.symbol("__I"), global_I_sym)
+                    s = s.replace(dace.symbol("__J"), global_J_sym)
+                    shape[i] = s
                 array.shape = tuple(shape)
 
         if "tile_i" not in nsdfg.sdfg.symbols:
@@ -1033,10 +1030,10 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
                 node.index_symbols = ["(tile_i+i)", "(tile_j+j)"]
                 node.global_domain_symbols = ["__global_I", "__global_J"]
             elif isinstance(node, dace.nodes.NestedSDFG):
-                node.symbol_mapping["tile_i"] = "tile_i"
-                node.symbol_mapping["tile_j"] = "tile_j"
-                node.symbol_mapping["__global_I"] = "__global_I"
-                node.symbol_mapping["__global_J"] = "__global_J"
+                node.symbol_mapping["tile_i"] = tile_i_sym
+                node.symbol_mapping["tile_j"] = tile_j_sym
+                node.symbol_mapping["__global_I"] = global_I_sym
+                node.symbol_mapping["__global_J"] = global_J_sym
                 if "tile_i" not in node.sdfg.symbols:
                     node.sdfg.add_symbol("tile_i", dace.int32)
                 if "tile_j" not in node.sdfg.symbols:
@@ -1045,6 +1042,11 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
                     node.sdfg.add_symbol("__global_I", dace.int32)
                 if "__global_J" not in node.sdfg.symbols:
                     node.sdfg.add_symbol("__global_J", dace.int32)
+
+        nsdfg.symbol_mapping["__global_I"] = dace.symbolic.pystr_to_symbolic(f"__I")
+        nsdfg.symbol_mapping["__global_J"] = dace.symbolic.pystr_to_symbolic(f"__J")
+        nsdfg.symbol_mapping["tile_i"] = tile_i_sym
+        nsdfg.symbol_mapping["tile_j"] = tile_j_sym
 
 
 class SequentialBlockLoopExpander(BlockVerticalLoopExpander):
