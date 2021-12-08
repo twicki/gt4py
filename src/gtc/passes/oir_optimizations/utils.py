@@ -16,7 +16,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Generic, List, Optional, Set, Tuple, TypeVar, cast
 
 from eve import NodeVisitor
 from eve.concepts import TreeNode
@@ -24,10 +24,15 @@ from eve.utils import XIterable, xiter
 from gtc import common, oir
 
 
+OffsetT = TypeVar("OffsetT")
+
+GeneralOffsetTuple = Tuple[int, int, Optional[int]]
+
+
 @dataclass(frozen=True)
-class Access:
+class GenericAccess(Generic[OffsetT]):
     field: str
-    offset: Tuple[int, int, int]
+    offset: OffsetT
     is_write: bool
     in_mask: bool = False
     region: Optional[oir.HorizontalMask] = None
@@ -37,6 +42,17 @@ class Access:
         return not self.is_write
 
 
+class CartesianAccess(GenericAccess[Tuple[int, int, int]]):
+    pass
+
+
+class GeneralAccess(GenericAccess[GeneralOffsetTuple]):
+    pass
+
+
+AccessT = TypeVar("AccessT", bound=GenericAccess)
+
+
 class AccessCollector(NodeVisitor):
     """Collects all field accesses and corresponding offsets."""
 
@@ -44,31 +60,19 @@ class AccessCollector(NodeVisitor):
         self,
         node: oir.FieldAccess,
         *,
-        accesses: List[Access],
-        is_write: bool,
-        **kwargs: Any,
-    ) -> None:
-        self.visit(
-            node.offset, accesses=accesses, field_name=node.name, is_write=is_write, **kwargs
-        )
-
-    def visit_CartesianOffset(
-        self,
-        node: common.CartesianOffset,
-        *,
-        accesses: List[Access],
-        field_name: str,
+        accesses: List[GeneralAccess],
         is_write: bool,
         region: oir.HorizontalMask = None,
+        in_mask=False,
         **kwargs: Any,
     ) -> None:
-        offsets = node.to_dict()
+        self.visit(node.offset, accesses=accesses, is_write=False, region=region, in_mask=in_mask)
         accesses.append(
-            Access(
-                field=field_name,
-                offset=(offsets["i"], offsets["j"], offsets["k"]),
+            GeneralAccess(
+                field=node.name,
+                offset=node.offset.to_tuple(),
                 is_write=is_write,
-                in_mask=kwargs.get("in_mask", False),
+                in_mask=in_mask,
                 region=region,
             )
         )
@@ -96,32 +100,32 @@ class AccessCollector(NodeVisitor):
         self.visit(node.body, **kwargs)
 
     @dataclass
-    class Result:
-        _ordered_accesses: List["Access"]
+    class GenericAccessCollection(Generic[AccessT, OffsetT]):
+        _ordered_accesses: List[AccessT]
 
         @staticmethod
-        def _offset_dict(accesses: XIterable) -> Dict[str, Set[Tuple[int, int, int]]]:
+        def _offset_dict(accesses: XIterable) -> Dict[str, Set[OffsetT]]:
             return accesses.reduceby(
                 lambda acc, x: acc | {x.offset}, "field", init=set(), as_dict=True
             )
 
-        def offsets(self) -> Dict[str, Set[Tuple[int, int, int]]]:
+        def offsets(self) -> Dict[str, Set[OffsetT]]:
             """Get a dictonary, mapping all accessed fields' names to sets of offset tuples."""
             return self._offset_dict(xiter(self._ordered_accesses))
 
-        def read_offsets(self) -> Dict[str, Set[Tuple[int, int, int]]]:
+        def read_offsets(self) -> Dict[str, Set[OffsetT]]:
             """Get a dictonary, mapping read fields' names to sets of offset tuples."""
             return self._offset_dict(xiter(self._ordered_accesses).filter(lambda x: x.is_read))
 
-        def read_accesses(self) -> List[Access]:
+        def read_accesses(self) -> List[AccessT]:
             """Get the sub-list of read accesses"""
             return list(xiter(self._ordered_accesses).filter(lambda x: x.is_read))
 
-        def write_offsets(self) -> Dict[str, Set[Tuple[int, int, int]]]:
+        def write_offsets(self) -> Dict[str, Set[OffsetT]]:
             """Get a dictonary, mapping written fields' names to sets of offset tuples."""
             return self._offset_dict(xiter(self._ordered_accesses).filter(lambda x: x.is_write))
 
-        def write_accesses(self) -> List[Access]:
+        def write_accesses(self) -> List[AccessT]:
             """Get the sub-list of write accesses"""
             return list(xiter(self._ordered_accesses).filter(lambda x: x.is_write))
 
@@ -141,12 +145,35 @@ class AccessCollector(NodeVisitor):
             """Get a set of all fields' names written in mask statements."""
             return {acc.field for acc in self._ordered_accesses if acc.is_write and acc.in_mask}
 
-        def ordered_accesses(self) -> List[Access]:
+        def ordered_accesses(self) -> List[AccessT]:
             """Get a list of ordered accesses."""
             return self._ordered_accesses
 
+    class CartesianAccessCollection(GenericAccessCollection[CartesianAccess, Tuple[int, int, int]]):
+        pass
+
+    class GeneralAccessCollection(GenericAccessCollection[GeneralAccess, GeneralOffsetTuple]):
+        def cartesian_accesses(self) -> "AccessCollector.CartesianAccessCollection":
+            return AccessCollector.CartesianAccessCollection(
+                [
+                    CartesianAccess(
+                        field=acc.field,
+                        offset=cast(Tuple[int, int, int], acc.offset)
+                        if acc.offset[2] is not None
+                        else (0, 0, 0),
+                        is_write=acc.is_write,
+                        region=acc.region,
+                        in_mask=acc.in_mask,
+                    )
+                    for acc in self._ordered_accesses
+                ]
+            )
+
+        def has_variable_access(self) -> bool:
+            return any(acc.offset[2] is None for acc in self._ordered_accesses)
+
     @classmethod
-    def _compensate_regions(cls, result: "AccessCollector.Result"):
+    def _compensate_regions(cls, result: "AccessCollector.GenericAccessCollection"):
 
         res_accesses = []
         for acc in result._ordered_accesses:
@@ -163,7 +190,6 @@ class AccessCollector(NodeVisitor):
                             off = 0
                     if off < 0:
                         if bound.start is None:
-                            # bound.start = common.AxisBound.start()
                             pass
                         elif bound.start.level == common.LevelMarker.START:
                             off = off + bound.start.offset
@@ -172,7 +198,7 @@ class AccessCollector(NodeVisitor):
                     res_offset.append(off)
                 res_offset.append(acc.offset[2])
                 res_accesses.append(
-                    Access(
+                    GeneralAccess(
                         field=acc.field,
                         offset=(res_offset[0], res_offset[1], res_offset[2]),
                         is_write=acc.is_write,
@@ -182,11 +208,13 @@ class AccessCollector(NodeVisitor):
                 )
             else:
                 res_accesses.append(acc)
-        return AccessCollector.Result(res_accesses)
+        return AccessCollector.GenericAccessCollection(res_accesses)
 
     @classmethod
-    def apply(cls, node: TreeNode, *, compensate_regions=False, **kwargs: Any) -> "Result":
-        result = cls.Result([])
+    def apply(
+        cls, node: TreeNode, *, compensate_regions=False, **kwargs: Any
+    ) -> "AccessCollector.GeneralAccessCollection":
+        result = cls.GeneralAccessCollection([])
         cls().visit(node, accesses=result._ordered_accesses, **kwargs)
 
         if compensate_regions:

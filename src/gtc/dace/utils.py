@@ -29,7 +29,7 @@ import gtc.oir as oir
 from eve.iterators import TraversalOrder, iter_tree
 from gtc import common
 from gtc.common import CartesianOffset, DataType, ExprKind, LevelMarker, typestr_to_data_type
-from gtc.passes.oir_optimizations.utils import Access, AccessCollector
+from gtc.passes.oir_optimizations.utils import AccessCollector, GenericAccess
 
 
 if TYPE_CHECKING:
@@ -381,7 +381,7 @@ class CartesianIJIndexSpace(tuple):
         )
 
     @staticmethod
-    def from_access(access: Access):
+    def from_access(access: GenericAccess):
         if access.region is None:
             return CartesianIJIndexSpace.from_offset(access.offset)
 
@@ -440,7 +440,7 @@ class CartesianIJIndexSpace(tuple):
             )
         )
 
-    def extended(self, access: Access):
+    def extended(self, access: GenericAccess):
         if access.region is None:
             return CartesianIJIndexSpace.from_access(access).compose(self)
 
@@ -540,7 +540,7 @@ def get_access_collection(
     from gtc.dace.nodes import HorizontalExecutionLibraryNode, VerticalLoopLibraryNode
 
     if isinstance(node, dace.SDFG):
-        res = AccessCollector.Result([])
+        res = AccessCollector.CartesianAccessCollection([])
         for node, _ in node.all_nodes_recursive():
             if isinstance(node, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
                 collection = get_access_collection(node)
@@ -550,7 +550,7 @@ def get_access_collection(
         return AccessCollector.apply(node.oir_node, compensate_regions=compensate_regions)
     else:
         assert isinstance(node, VerticalLoopLibraryNode)
-        res = AccessCollector.Result([])
+        res = AccessCollector.CartesianAccessCollection([])
         for _, sdfg in node.sections:
             collection = get_access_collection(sdfg)
             res._ordered_accesses.extend(collection._ordered_accesses)

@@ -41,11 +41,15 @@ class ScalarAccess(common.ScalarAccess, Expr):  # type: ignore
     pass
 
 
-class FieldAccess(common.FieldAccess, Expr):  # type: ignore
+class VariableKOffset(common.VariableKOffset[Expr]):
+    pass
+
+
+class FieldAccess(common.FieldAccess[Expr, VariableKOffset], Expr):  # type: ignore
     in_horizontal_mask: bool = False
 
 
-class IJCacheAccess(common.FieldAccess[Expr], Expr):
+class IJCacheAccess(common.FieldAccess[Expr, VariableKOffset], Expr):
     ij_cache_is_different_from_field_access = True
     in_horizontal_mask: bool = False
 
@@ -62,7 +66,7 @@ class IJCacheAccess(common.FieldAccess[Expr], Expr):
         return v
 
 
-class KCacheAccess(common.FieldAccess[Expr], Expr):
+class KCacheAccess(common.FieldAccess[Expr, VariableKOffset], Expr):
     k_cache_is_different_from_field_access = True
 
     @validator("offset")
@@ -117,10 +121,6 @@ class Cast(common.Cast[Expr], Expr):  # type: ignore
     pass
 
 
-class VariableOffset(common.VariableOffset):
-    pass
-
-
 class NativeFuncCall(common.NativeFuncCall[Expr], Expr):
     _dtype_propagation = common.native_func_call_dtype_propagation(strict=True)
 
@@ -152,8 +152,31 @@ class Temporary(Decl):
     pass
 
 
-class IJExtent(common.IJExtent):
-    pass
+class IJExtent(LocNode):
+    i: Tuple[int, int]
+    j: Tuple[int, int]
+
+    @classmethod
+    def zero(cls) -> "IJExtent":
+        return cls(i=(0, 0), j=(0, 0))
+
+    @classmethod
+    def from_offset(cls, offset: Union[CartesianOffset, VariableKOffset]) -> "IJExtent":
+        if isinstance(offset, VariableKOffset):
+            return cls(i=(0, 0), j=(0, 0))
+        return cls(i=(offset.i, offset.i), j=(offset.j, offset.j))
+
+    def union(*extents: "IJExtent") -> "IJExtent":
+        return IJExtent(
+            i=(min(e.i[0] for e in extents), max(e.i[1] for e in extents)),
+            j=(min(e.j[0] for e in extents), max(e.j[1] for e in extents)),
+        )
+
+    def __add__(self, other: "IJExtent") -> "IJExtent":
+        return IJExtent(
+            i=(self.i[0] + other.i[0], self.i[1] + other.i[1]),
+            j=(self.j[0] + other.j[0], self.j[1] + other.j[1]),
+        )
 
 
 class KExtent(LocNode):
@@ -164,9 +187,9 @@ class KExtent(LocNode):
         return cls(k=(0, 0))
 
     @classmethod
-    def from_offset(cls, offset: CartesianOffset) -> "KExtent":
-        k_offset = offset.to_dict()["k"]
-        return cls(k=(k_offset, k_offset))
+    def from_offset(cls, offset: Union[CartesianOffset, VariableKOffset]) -> "KExtent":
+        MAX_OFFSET = 1000
+        return cls(k=(offset.k, offset.k)) if offset.k else cls(k=(-MAX_OFFSET, MAX_OFFSET))
 
     def union(*extents: "KExtent") -> "KExtent":
         return KExtent(k=(min(e.k[0] for e in extents), max(e.k[1] for e in extents)))

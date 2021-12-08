@@ -25,7 +25,7 @@ from gtc.common import (
     HorizontalInterval,
     LevelMarker,
     LoopOrder,
-    VariableOffset,
+    VariableKOffset,
 )
 from gtc.oir import AxisBound, FieldAccess, Interval
 
@@ -39,7 +39,7 @@ from .oir_utils import (
     HorizontalSwitchFactory,
     MaskStmtFactory,
     StencilFactory,
-    VariableOffsetFactory,
+    VariableKOffsetFactory,
     VerticalLoopFactory,
     VerticalLoopSectionFactory,
     WhileFactory,
@@ -318,8 +318,8 @@ def test_loop_mask():
 
 
 def test_variable_offset_with_float_field():
-    with pytest.raises(ValueError, match=r"Variable k-offset must have an integer type"):
-        VariableOffsetFactory(
+    with pytest.raises(ValueError, match=r"Variable vertical index must be an integer"):
+        VariableKOffsetFactory(
             k__name="offset_field",
             k__dtype=DataType.FLOAT32,
         )
@@ -349,7 +349,7 @@ def test_assign_with_variable_offset():
                                     left__name=out_name,
                                     right=FieldAccessFactory(
                                         name=in_name,
-                                        offset=VariableOffsetFactory(
+                                        offset=VariableKOffsetFactory(
                                             k__name=offset_name,
                                             k__dtype=DataType.INT32,
                                         ),
@@ -365,7 +365,7 @@ def test_assign_with_variable_offset():
 
     variable_assign = testee.vertical_loops[0].sections[0].horizontal_executions[0].body[0]
     assert isinstance(variable_assign.left.offset, CartesianOffset)
-    assert isinstance(variable_assign.right.offset, VariableOffset)
+    assert isinstance(variable_assign.right.offset, VariableKOffset)
     assert isinstance(variable_assign.right.offset.k, FieldAccess)
     assert isinstance(variable_assign.right.offset.k.offset, CartesianOffset)
 

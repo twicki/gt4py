@@ -14,6 +14,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import numbers
 from typing import Any, Dict, List, Optional, Set, Union, cast
 
 import numpy as np
@@ -34,6 +35,7 @@ from gt4py.ir.nodes import (
     Cast,
     ComputationBlock,
     Domain,
+    Expr,
     FieldDecl,
     FieldRef,
     For,
@@ -154,20 +156,14 @@ class DefIRToGTIR(IRNodeVisitor):
         CheckHorizontalRegionAccesses().visit(stencil)
         return stencil
 
-    def __init__(self):
-        self._field_params = {}
-        self._scalar_params = {}
-
     def visit_StencilDefinition(self, node: StencilDefinition) -> gtir.Stencil:
-        self._field_params = {f.name: self.visit(f) for f in node.api_fields}
-        self._scalar_params = {p.name: self.visit(p) for p in node.parameters}
+        field_params = {f.name: self.visit(f) for f in node.api_fields}
+        scalar_params = {p.name: self.visit(p) for p in node.parameters}
         vertical_loops = [self.visit(c) for c in node.computations if c.body.stmts]
         return gtir.Stencil(
-            name=node.name.split(".")[
-                -1
-            ],  # TODO probably definition IR should not contain '.' in the name
+            name=node.name,
             params=[
-                self.visit(f, all_params={**self._field_params, **self._scalar_params})
+                self.visit(f, all_params={**field_params, **scalar_params})
                 for f in node.api_signature
             ],
             vertical_loops=vertical_loops,
@@ -301,9 +297,8 @@ class DefIRToGTIR(IRNodeVisitor):
         ]
         return gtir.FieldAccess(
             name=node.name,
-            offset=self._transform_offset(node.offset, **kwargs),
+            offset=self.transform_offset(node.offset),
             data_index=data_index,
-            dtype=self._field_params[node.name].dtype if node.name in self._field_params else None,
         )
 
     def visit_If(self, node: If, **kwargs: Any) -> Union[gtir.FieldIfStmt, gtir.ScalarIfStmt]:
@@ -344,15 +339,8 @@ class DefIRToGTIR(IRNodeVisitor):
             body=[stmt for stmt in self.visit(node.body, symtable={target.name: target})],
         )
 
-    def visit_VarRef(self, node: VarRef, **kwargs: Any) -> gtir.ScalarAccess:
-        # TODO(havogt) seems wrong, but check the DefinitionIR for
-        # test_code_generation.py::test_generation_cpu[native_functions,
-        # there we have a FieldAccess on a VarDecl
-        # Probably the frontend needs to be fixed.
-        if node.name in self._scalar_params:
-            return gtir.ScalarAccess(name=node.name)
-        else:
-            return gtir.FieldAccess(name=node.name, offset=gtir.CartesianOffset.zero())
+    def visit_VarRef(self, node: VarRef, **kwargs):
+        return gtir.ScalarAccess(name=node.name)
 
     def visit_AxisInterval(self, node: AxisInterval):
         return self.visit(node.start), self.visit(node.end)
@@ -378,10 +366,13 @@ class DefIRToGTIR(IRNodeVisitor):
         # datatype conversion works via same ID
         return gtir.ScalarDecl(name=node.name, dtype=common.DataType(int(node.data_type.value)))
 
-    def _transform_offset(self, offset: Dict[str, int], **kwargs: Any) -> gtir.CartesianOffset:
-        i = offset["I"] if "I" in offset else 0
-        j = offset["J"] if "J" in offset else 0
-        k = offset["K"] if "K" in offset else 0
-        if isinstance(k, int):
-            return gtir.CartesianOffset(i=i, j=j, k=k)
-        return gtir.VariableOffset(i=i, j=j, k=self.visit(k, **kwargs))
+    def transform_offset(
+        self, offset: Dict[str, Union[int, Expr]], **kwargs: Any
+    ) -> Union[gtir.CartesianOffset, gtir.VariableKOffset]:
+        k_val = offset.get("K", 0)
+        if isinstance(k_val, numbers.Integral):
+            return gtir.CartesianOffset(i=offset.get("I", 0), j=offset.get("J", 0), k=k_val)
+        elif isinstance(k_val, Expr):
+            return gtir.VariableKOffset(k=self.visit(k_val, **kwargs))
+        else:
+            raise TypeError("Unrecognized vertical offset type")

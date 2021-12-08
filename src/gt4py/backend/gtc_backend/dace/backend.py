@@ -195,9 +195,10 @@ class GTCDaCeExtGenerator:
         )
         gtir = GtirPipeline(DefIRToGTIR.apply(definition_ir)).full()
         base_oir = gtir_to_oir.GTIRToOIR().visit(gtir)
-        oir = self.backend.builder.options.backend_opts.get("oir_pipeline", default_pipeline).run(
-            base_oir
+        oir_pipeline = self.backend.builder.options.backend_opts.get(
+            "oir_pipeline", default_pipeline
         )
+        oir = oir_pipeline.run(base_oir)
         sdfg = OirSDFGBuilder().visit(oir)
 
         to_device(sdfg, self.backend.storage_info["device"])

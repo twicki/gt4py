@@ -14,9 +14,6 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import pytest
-
-from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
 from gtc.passes.oir_optimizations.vertical_loop_merging import AdjacentLoopMerging
 from gtc.passes.oir_pipeline import DefaultPipeline
 
@@ -29,7 +26,7 @@ def test_no_skipping():
     assert pipeline.steps == DefaultPipeline.all_steps()
 
 
-def test_skip_one():
+def test_skip():
     skip = [AdjacentLoopMerging]
     pipeline = DefaultPipeline(skip=skip)
     pipeline.run(StencilFactory())

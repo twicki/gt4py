@@ -1348,7 +1348,7 @@ class IRMaker(ast.NodeVisitor):
         if isinstance(node.func, ast.Name) and node.func.id == "index":
             assert len(node.args) == 1
             axis_name = node.args[0].id
-            return gt_ir.AxisIndex(axis=axis_name, data_type=gt_ir.DataType.INT32)
+            return gt_ir.AxisPosition(axis=axis_name)
 
         else:
             native_fcn = gt_ir.NativeFunction.PYTHON_SYMBOL_TO_IR_OP[node.func.id]
@@ -1614,7 +1614,7 @@ class GTScriptParser(ast.NodeVisitor):
         self.ast_root = ast.parse(self.source)
         self.options = options
         self.build_info = options.build_info
-        self.main_name = options.qualified_name
+        self.main_name = options.name
         self.definition_ir = None
         self.external_context = externals or {}
         self.resolved_externals = {}

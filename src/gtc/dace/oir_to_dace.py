@@ -27,7 +27,7 @@ from dace.sdfg.graph import MultiConnectorEdge
 
 import eve
 import gtc.oir as oir
-from gtc.common import LevelMarker, VariableOffset, data_type_to_typestr
+from gtc.common import LevelMarker, data_type_to_typestr
 from gtc.dace.nodes import HorizontalExecutionLibraryNode, VerticalLoopLibraryNode
 from gtc.dace.utils import (
     CartesianIJIndexSpace,
@@ -50,12 +50,10 @@ class BaseOirSDFGBuilder(ABC):
 
     def __init__(self, name, stencil: Stencil, nodes):
         self._stencil = stencil
-        self._sdfg = SDFG(name + "_trimmed")
-        self._state = self._sdfg.add_state(name + "_trimmed_state")
-        for node in nodes:
-            self._state.add_node(node)
+        self._sdfg = SDFG(name)
+        self._state = self._sdfg.add_state(name + "_state")
         self._extents = nodes_extent_calculation(nodes)
-        self._nodes = nodes
+
         self._dtypes = {decl.name: decl.dtype for decl in stencil.declarations + stencil.params}
         self._axes = {
             decl.name: decl.dimensions
@@ -67,7 +65,7 @@ class BaseOirSDFGBuilder(ABC):
         self._recent_read_acc: Dict[str, dace.nodes.AccessNode] = dict()
 
         self._access_nodes: Dict[str, dace.nodes.AccessNode] = dict()
-        self._access_collection_cache: Dict[int, AccessCollector.Result] = dict()
+        self._access_collection_cache: Dict[int, AccessCollector.CartesianAccessCollection] = dict()
         self._source_nodes: Dict[str, dace.nodes.AccessNode] = dict()
         self._delete_candidates: List[MultiConnectorEdge] = list()
 
@@ -116,32 +114,24 @@ class BaseOirSDFGBuilder(ABC):
         return None
 
     def _get_access_collection(
-        self,
-        node: "Union[HorizontalExecutionLibraryNode, VerticalLoopLibraryNode, SDFG]",
-    ) -> "AccessCollector.Result":
+        self, node: "Union[HorizontalExecutionLibraryNode, VerticalLoopLibraryNode, SDFG]"
+    ) -> AccessCollector.CartesianAccessCollection:
         if isinstance(node, SDFG):
-            res = AccessCollector.Result([])
+            res = AccessCollector.CartesianAccessCollection([])
             for node in node.states()[0].nodes():
                 if isinstance(node, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
                     collection = self._get_access_collection(node)
-                    res._ordered_accesses.extend(collection._ordered_accesses)
-            return res
-        elif isinstance(node, list):
-            res = AccessCollector.Result([])
-            for n in node:
-                if isinstance(n, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode)):
-                    collection = self._get_access_collection(n)
                     res._ordered_accesses.extend(collection._ordered_accesses)
             return res
         elif isinstance(node, HorizontalExecutionLibraryNode):
             if id(node.oir_node) not in self._access_collection_cache:
                 self._access_collection_cache[id(node.oir_node)] = AccessCollector.apply(
                     node.oir_node
-                )
+                ).cartesian_accesses()
             return self._access_collection_cache[id(node.oir_node)]
         else:
             assert isinstance(node, VerticalLoopLibraryNode)
-            res = AccessCollector.Result([])
+            res = AccessCollector.CartesianAccessCollection([])
             for _, sdfg in node.sections:
                 collection = self._get_access_collection(sdfg)
                 res._ordered_accesses.extend(collection._ordered_accesses)
@@ -178,7 +168,9 @@ class BaseOirSDFGBuilder(ABC):
     def _reset_writes(self):
         self._recent_write_acc = dict()
 
-    def _add_read_edges(self, node, collections: List[Tuple[Interval, AccessCollector.Result]]):
+    def _add_read_edges(
+        self, node, collections: List[Tuple[Interval, AccessCollector.CartesianAccessCollection]]
+    ):
         read_accesses: Dict[str, dace.nodes.AccessNode] = dict()
         for interval, access_collection in collections:
 
@@ -204,7 +196,9 @@ class BaseOirSDFGBuilder(ABC):
             node.add_in_connector("IN_" + name)
             self._state.add_edge(recent_access, None, node, "IN_" + name, dace.Memlet())
 
-    def _add_write_edges(self, node, collections: List[Tuple[Interval, AccessCollector.Result]]):
+    def _add_write_edges(
+        self, node, collections: List[Tuple[Interval, AccessCollector.CartesianAccessCollection]]
+    ):
         write_accesses = dict()
         for interval, access_collection in collections:
             for name in access_collection.write_fields():
@@ -227,7 +221,7 @@ class BaseOirSDFGBuilder(ABC):
             self._state.add_edge(node, "OUT_" + name, access_node, None, dace.Memlet())
 
     def _add_write_after_write_edges(
-        self, node, collections: List[Tuple[Interval, AccessCollector.Result]]
+        self, node, collections: List[Tuple[Interval, AccessCollector.CartesianAccessCollection]]
     ):
         for interval, collection in collections:
             for name in collection.write_fields():
@@ -236,7 +230,7 @@ class BaseOirSDFGBuilder(ABC):
                     self._delete_candidates.append(edge)
 
     def _add_write_after_read_edges(
-        self, node, collections: List[Tuple[Interval, AccessCollector.Result]]
+        self, node, collections: List[Tuple[Interval, AccessCollector.CartesianAccessCollection]]
     ):
         for interval, collection in collections:
             for name in collection.read_fields():
@@ -308,6 +302,7 @@ class BaseOirSDFGBuilder(ABC):
                     shape=shapes[name],
                     strides=strides,
                     transient=isinstance(decl, Temporary) and self.has_transients,
+                    lifetime=dace.AllocationLifetime.Persistent,
                 )
 
     def add_subsets(self):
@@ -417,15 +412,12 @@ class VerticalLoopSectionOirSDFGBuilder(BaseOirSDFGBuilder):
 
     def get_k_subsets(self, node):
         assert isinstance(node, HorizontalExecutionLibraryNode)
+        collection = self._get_access_collection(node)
         write_subsets = dict()
         read_subsets = dict()
         k_origins = dict()
-
-        section_collection = self._get_access_collection(self._nodes)
-        for name, offsets in section_collection.offsets().items():
+        for name, offsets in collection.offsets().items():
             k_origins[name] = -min(o[2] for o in offsets)
-
-        collection = self._get_access_collection(node)
         for name, offsets in collection.read_offsets().items():
             if self._axes[name][2]:
                 read_subsets[name] = "{origin}{min_off:+d}:{origin}{max_off:+d}".format(
@@ -484,7 +476,7 @@ class StencilOirSDFGBuilder(BaseOirSDFGBuilder):
         shapes = dict()
         for decl in self._stencil.params + self._stencil.declarations:
             name = decl.name
-            if name not in self._axes or name not in self._extents:
+            if name not in self._axes:
                 continue
             shape = []
             if self._axes[name][0]:
@@ -534,7 +526,7 @@ class StencilOirSDFGBuilder(BaseOirSDFGBuilder):
             for name, offsets in collection.read_offsets().items():
                 if self._axes[name][2]:
                     for offset in offsets:
-                        k_offset = 0 if offset[2] == VariableOffset.LARGE_NUM else offset[2]
+                        k_offset = 0 if offset[2] == 10000 else offset[2]
                         read_interval = interval.shifted(k_offset)
                         read_intervals.setdefault(name, read_interval)
                         read_intervals[name] = Interval(

@@ -404,6 +404,7 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
             access_collection = get_access_collection(section)
             for name, offsets in access_collection.offsets().items():
                 for off in offsets:
+
                     k_level = oir.AxisBound(
                         level=interval.start.level, offset=interval.start.offset + off[2]
                     )
@@ -427,10 +428,8 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
             for ln, _ in section.all_nodes_recursive()
             if isinstance(ln, (HorizontalExecutionLibraryNode, VerticalLoopLibraryNode))
         ):
-            access_collection: AccessCollector.Result = get_access_collection(
-                he,
-                compensate_regions=True
-                # he, compensate_regions=False
+            access_collection: AccessCollector.CartesianAccessCollection = get_access_collection(
+                he, compensate_regions=True
             )
 
             for name, offsets in access_collection.offsets().items():
@@ -608,7 +607,7 @@ class ParallelNaiveVerticalLoopExpander(NaiveVerticalLoopExpander):
 
 class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
     def get_origins(self, compensate_regions=False):
-        access_collection: AccessCollector.Result = get_access_collection(
+        access_collection: AccessCollector.CartesianAccessCollection = get_access_collection(
             self.node, compensate_regions=False
         )
 
@@ -660,7 +659,9 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
     def get_innermost_memlets(self):
 
-        access_collection: AccessCollector.Result = get_access_collection(self.node)
+        access_collection: AccessCollector.CartesianAccessCollection = get_access_collection(
+            self.node
+        )
         region_accesses = {
             acc.field for acc in access_collection.ordered_accesses() if acc.region is not None
         }

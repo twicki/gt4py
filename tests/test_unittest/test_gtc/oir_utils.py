@@ -45,21 +45,19 @@ class ScalarAccessFactory(factory.Factory):
     dtype = common.DataType.FLOAT32
 
 
+class VariableKOffsetFactory(factory.Factory):
+    class Meta:
+        model = oir.VariableKOffset
+
+    k = factory.SubFactory(FieldAccessFactory, dtype=common.DataType.INT32)
+
+
 class LiteralFactory(factory.Factory):
     class Meta:
         model = oir.Literal
 
     value = "42"
     dtype = common.DataType.FLOAT32
-
-
-class VariableOffsetFactory(factory.Factory):
-    class Meta:
-        model = common.VariableOffset
-
-    i = 0
-    j = 0
-    k = factory.SubFactory(FieldAccessFactory)
 
 
 class AssignStmtFactory(factory.Factory):
