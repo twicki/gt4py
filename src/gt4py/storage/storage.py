@@ -250,11 +250,19 @@ class Storage(np.ndarray):
         raise NotImplementedError("Concatenation of Storages is not supported")
 
     def __descriptor__(self):
-        return dace.data.Array(
+        storage = (
+            dace.StorageType.GPU_Global
+            if hasattr(self, "__cuda_array_interface__")
+            else dace.StorageType.CPU_Heap
+        )
+        descriptor = dace.data.Array(
             shape=self.shape,
             strides=[s // self.itemsize for s in self.strides],
             dtype=dace.typeclass(str(self.dtype)),
+            storage=storage,
         )
+        descriptor.default_origin = self.default_origin
+        return descriptor
 
 
 class GPUStorage(Storage):

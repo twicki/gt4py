@@ -25,9 +25,10 @@ import time
 import typing
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import dace
+import dace.frontend.python.common
 import numpy as np
 from dace.frontend.python.common import SDFGClosure, SDFGConvertible
 
@@ -257,28 +258,7 @@ class FrozenStencil(SDFGConvertible):
 
     def __sdfg_signature__(self):
         self._assert_dace_backend()
-
-        special_args = {"self", "domain", "origin", "validate_args", "exec_info"}
-        args = []
-        consts = []
-        for arg in (
-            inspect.getfullargspec(self.stencil_object.__call__).args
-            + inspect.getfullargspec(self.stencil_object.__call__).kwonlyargs
-        ):
-            if arg in special_args:
-                continue
-            if (
-                arg in self.stencil_object.field_info
-                and self.stencil_object.field_info[arg] is None
-            ):
-                consts.append(arg)
-            if (
-                arg in self.stencil_object.parameter_info
-                and self.stencil_object.parameter_info[arg] is None
-            ):
-                consts.append(arg)
-            args.append(arg)
-        return (args, consts)
+        return self.stencil_object.__sdfg_signature__()
 
     def __sdfg_closure__(self, *args, **kwargs):
         self._assert_dace_backend()
@@ -289,7 +269,7 @@ class FrozenStencil(SDFGConvertible):
         return SDFGClosure()
 
 
-class StencilObject(abc.ABC):
+class StencilObject(abc.ABC, dace.frontend.python.common.SDFGConvertible):
     """Generic singleton implementation of a stencil callable.
 
     This class is used as base class for specific subclass generated
@@ -334,10 +314,12 @@ class StencilObject(abc.ABC):
     # Those attributes are added to the class at loading time:
     _gt_id_: str
     definition_func: Callable[..., Any]
+    _frozen_cache: Dict[Any, FrozenStencil]
 
     def __new__(cls, *args, **kwargs):
         if getattr(cls, "_instance", None) is None:
             cls._instance = object.__new__(cls)
+            cls._frozen_cache = dict()
         return cls._instance
 
     def __setattr__(self, key, value) -> None:
@@ -634,7 +616,8 @@ class StencilObject(abc.ABC):
                         *((0,) * len(field_info.data_dims)),
                     )
 
-                elif isinstance(field_arg := field_args.get(name), gt_storage.storage.Storage):
+                elif hasattr(field_arg := field_args.get(name), "default_origin"):
+                    assert field_arg is not None
                     origin[name] = field_arg.default_origin
 
                 else:
@@ -699,6 +682,11 @@ class StencilObject(abc.ABC):
         if exec_info is not None:
             exec_info["call_run_end_time"] = time.perf_counter()
 
+    @staticmethod
+    def _get_domain_origin_key(domain, origin):
+        origins_tuple = tuple((k, v) for k, v in sorted(origin.items()))
+        return domain, origins_tuple
+
     def freeze(
         self: "StencilObject", *, origin: Dict[str, Tuple[int, ...]], domain: Tuple[int, ...]
     ) -> FrozenStencil:
@@ -725,4 +713,64 @@ class StencilObject(abc.ABC):
                 or domain occurs at call time so it is the users responsibility to ensure
                 correct usage.
         """
-        return FrozenStencil(self, origin, domain)
+        key = StencilObject._get_domain_origin_key(domain, origin)
+        if key not in self._frozen_cache:
+            self._frozen_cache[key] = FrozenStencil(self, origin, domain)
+        return self._frozen_cache[key]
+
+    def _normalize_args(self, *args, domain=None, origin=None, **kwargs):
+        arg_names, consts = self.__sdfg_signature__()
+        args_iter = iter(args)
+        args_as_kwargs = {
+            name: (kwargs[name] if name in kwargs else next(args_iter)) for name in arg_names
+        }
+
+        origin = self._normalize_origins(args_as_kwargs, origin)
+        if domain is None:
+            domain = self._get_max_domain(args_as_kwargs, origin)
+        for key, value in kwargs.items():
+            args_as_kwargs.setdefault(key, value)
+        args_as_kwargs["domain"] = domain
+        args_as_kwargs["origin"] = origin
+        return args_as_kwargs
+
+    def __sdfg__(self, *args, **kwargs) -> dace.SDFG:
+        norm_kwargs = self._normalize_args(*args, **kwargs)
+        frozen_stencil = self.freeze(origin=norm_kwargs["origin"], domain=norm_kwargs["domain"])
+        return frozen_stencil.__sdfg__(*args, **kwargs)
+
+    def __sdfg_closure__(self, reevaluate: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return {}
+
+    def __sdfg_signature__(self) -> Tuple[Sequence[str], Sequence[str]]:
+        special_args = {"self", "domain", "origin", "validate_args", "exec_info"}
+        args = []
+        consts = []
+        for arg in (
+            inspect.getfullargspec(self.__call__).args
+            + inspect.getfullargspec(self.__call__).kwonlyargs
+        ):
+            if arg in special_args:
+                continue
+            if arg in self.field_info and self.field_info[arg] is None:
+                consts.append(arg)
+            if arg in self.parameter_info and self.parameter_info[arg] is None:
+                consts.append(arg)
+            args.append(arg)
+        return (args, consts)
+
+    def closure_resolver(
+        self,
+        constant_args: Dict[str, Any],
+        parent_closure: Optional["dace.frontend.python.common.SDFGClosure"] = None,
+    ) -> "dace.frontend.python.common.SDFGClosure":
+        return dace.frontend.python.common.SDFGClosure()
+
+    def clean_call_args_cache(self: "StencilObject") -> None:
+        """Clean the argument cache.
+
+        Returns
+        -------
+            None
+        """
+        type(self)._domain_origin_cache.clear()
