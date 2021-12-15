@@ -23,10 +23,10 @@ from eve.codegen import FormatTemplate, JinjaTemplate, TemplatedGenerator
 from eve.visitors import NodeVisitor
 from gt4py.definitions import Extent
 from gtc import common
-from gtc.python import npir
+from gtc.numpy import npir
 
 
-__all__ = ["NpirGen"]
+__all__ = ["NpirCodegen"]
 
 
 def op_delta_from_int(value: int) -> Tuple[str, str]:
@@ -257,7 +257,7 @@ class ExtentCalculator(NodeVisitor):
             )
 
 
-class NpirGen(TemplatedGenerator):
+class NpirCodegen(TemplatedGenerator):
     def visit_DataType(self, node: common.DataType, **kwargs: Any) -> Union[str, Collection[str]]:
         return f"np.{node.name.lower()}"
 
@@ -523,6 +523,7 @@ class NpirGen(TemplatedGenerator):
         textwrap.dedent(
             """\
             import numpy as np
+            import scipy.special
             import numbers
 
             def run({{ signature }}):
@@ -552,14 +553,16 @@ class NpirGen(TemplatedGenerator):
         self, node: common.NativeFunction, **kwargs: Any
     ) -> Union[str, Collection[str]]:
         if node == common.NativeFunction.MIN:
-            return "minimum"
+            return "np.minimum"
         elif node == common.NativeFunction.MAX:
-            return "maximum"
+            return "np.maximum"
         elif node == common.NativeFunction.POW:
-            return "power"
-        return self.generic_visit(node, **kwargs)
+            return "np.power"
+        elif node == common.NativeFunction.GAMMA:
+            return "scipy.special.gamma"
+        return "np." + self.generic_visit(node, **kwargs)
 
-    NativeFuncCall = FormatTemplate("np.{func}({', '.join(arg for arg in args)})")
+    NativeFuncCall = FormatTemplate("{func}({', '.join(arg for arg in args)})")
 
     While = JinjaTemplate(
         textwrap.dedent(
