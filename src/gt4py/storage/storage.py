@@ -13,9 +13,9 @@
 # distribution for a copy of the license or check <https://www.gnu.org/licenses/>.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
-
 from typing import Dict
 
+import dace.data
 import numpy as np
 
 
@@ -249,6 +249,21 @@ class Storage(np.ndarray):
     def __iconcat__(self, other):
         raise NotImplementedError("Concatenation of Storages is not supported")
 
+    def __descriptor__(self):
+        storage = (
+            dace.StorageType.GPU_Global
+            if hasattr(self, "__cuda_array_interface__")
+            else dace.StorageType.CPU_Heap
+        )
+        descriptor = dace.data.Array(
+            shape=self.shape,
+            strides=[s // self.itemsize for s in self.strides],
+            dtype=dace.typeclass(str(self.dtype)),
+            storage=storage,
+        )
+        descriptor.default_origin = self.default_origin
+        return descriptor
+
 
 class GPUStorage(Storage):
     _modified_storages: Dict[int, "GPUStorage"] = dict()
@@ -270,7 +285,13 @@ class GPUStorage(Storage):
         return list(cls._modified_storages.values())
 
     @property
+    def __array_interface__(self):
+        self.device_to_host()
+        return super().__array_interface__
+
+    @property
     def __cuda_array_interface__(self):
+        self.host_to_device()
         array_interface = self.__array_interface__
         array_interface["version"] = 2
         array_interface["strides"] = self.strides

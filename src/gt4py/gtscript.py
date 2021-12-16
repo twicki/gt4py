@@ -21,13 +21,19 @@ definitions for the keywords of the DSL.
 """
 
 import collections
+import copy
 import inspect
+import itertools
 import numbers
+import operator
+import re
 import types
-from typing import Callable, Dict, Type
+from typing import Callable, Dict, Type, Union
 
+import dace
 import numpy as np
 
+import gt4py.backend
 from gt4py import definitions as gt_definitions
 from gt4py.lazy_stencil import LazyStencil
 from gt4py.stencil_builder import StencilBuilder
@@ -86,8 +92,11 @@ builtins = {
     "__externals__",
     "__INLINED",
     "compile_assert",
+    "region",
+    "horizontal",
     *MATH_BUILTINS,
 }
+
 
 IGNORE_WHEN_INLINING = {*MATH_BUILTINS, "compile_assert"}
 
@@ -95,7 +104,6 @@ __all__ = list(builtins) + ["function", "stencil", "lazy_stencil"]
 
 __externals__ = "Placeholder"
 __gtscript__ = "Placeholder"
-
 
 _VALID_DATA_TYPES = (
     bool,
@@ -376,6 +384,94 @@ def lazy_stencil(
     return _decorator(definition)
 
 
+def as_sdfg(*args, **kwargs) -> dace.SDFG:
+    def _decorator(definition_func):
+
+        from gt4py.backend.gtc_backend.dace.backend import expand_and_wrap_sdfg, to_device
+        from gt4py.backend.gtc_backend.defir_to_gtir import DefIRToGTIR
+        from gt4py.definitions import BuildOptions
+        from gt4py.frontend.gtscript_frontend import GTScriptFrontend
+        from gtc.dace.oir_to_dace import OirSDFGBuilder
+        from gtc.gtir_to_oir import GTIRToOIR
+        from gtc.passes.gtir_pipeline import GtirPipeline
+        from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
+        from gtc.passes.oir_optimizations.inlining import MaskInlining
+        from gtc.passes.oir_optimizations.mask_stmt_merging import MaskStmtMerging
+
+        definition_ir = GTScriptFrontend.generate(
+            definition_func,
+            externals=kwargs,
+            options=BuildOptions(
+                name=definition_func.__name__,
+                module=inspect.currentframe().f_back.f_globals["__name__"],
+            ),
+        )
+        gt_ir = DefIRToGTIR.apply(definition_ir)
+        gt_ir = GtirPipeline(gt_ir).full()
+        from gtc.passes.oir_pipeline import OirPipeline
+
+        oir = OirPipeline(GTIRToOIR().visit(gt_ir)).full(
+            skip=[
+                MaskStmtMerging,
+                MaskInlining,
+                FillFlushToLocalKCaches,
+            ]
+        )
+
+        sdfg: dace.SDFG = OirSDFGBuilder().visit(oir)
+        backend = gt4py.backend.from_name(kwargs.get("backend", "gtc:dace"))
+        to_device(sdfg, device=backend.storage_info["device"])
+        sdfg = expand_and_wrap_sdfg(gt_ir, sdfg, layout_map=backend.storage_info["layout_map"])
+
+        return sdfg
+
+    if not kwargs and len(args) == 1:
+        return _decorator(args[0])
+    else:
+        return _decorator
+
+
+class SDFGWrapper:
+
+    loaded_compiled_sdfgs: Dict[str, dace.SDFG] = dict()
+
+    def __init__(
+        self,
+        definition,
+        domain,
+        origin,
+        *,
+        dtypes=None,
+        externals=None,
+        format_source=True,
+        name=None,
+        rebuild=False,
+        **kwargs,
+    ):
+
+        self.func = definition
+
+        self.domain = domain
+        self.origin = origin
+        self.backend = kwargs.get("backend", "gtc:dace")
+        if "backend" in kwargs:
+            del kwargs["backend"]
+        self.device = gt4py.backend.from_name(self.backend).storage_info["device"]
+        self.stencil_kwargs = {
+            **kwargs,
+            **dict(
+                dtypes=dtypes,
+                format_source=format_source,
+                name=name,
+                rebuild=rebuild,
+                externals=externals,
+            ),
+        }
+        self.stencil_object = None
+        self.filename = None
+        self._sdfg = None
+
+
 class AxisIndex:
     def __init__(self, axis: str, index: int, offset: int = 0):
         self.axis = axis
@@ -391,9 +487,13 @@ class AxisIndex:
     def __str__(self):
         return f"{self.axis}[{self.index}] + {self.offset}"
 
-    def __add__(self, offset: int):
-        if not isinstance(offset, numbers.Integral):
-            raise TypeError("Offset should be an integer type")
+    def __add__(self, offset: Union[int, "AxisIndex"]):
+        if not isinstance(offset, numbers.Integral) and not isinstance(offset, AxisIndex):
+            raise TypeError("Offset should be an integer type or axis index")
+        if isinstance(offset, AxisIndex):
+            if not self.axis == offset.axis:
+                raise ValueError("Only AxisIndex with same axis can be added.")
+            offset = offset.offset
         if offset == 0:
             return self
         else:
@@ -407,6 +507,9 @@ class AxisIndex:
 
     def __rsub__(self, offset: int):
         return self.__radd__(-offset)
+
+    def __neg__(self):
+        return AxisIndex(self.axis, self.index, -self.offset)
 
 
 class AxisInterval:
@@ -487,6 +590,12 @@ PARALLEL = 0
 """Parallel iteration order."""
 
 
+from itertools import count
+
+
+sym_ctr = count()
+
+
 class _FieldDescriptor:
     def __init__(self, dtype, axes, data_dims=tuple()):
         if isinstance(dtype, str):
@@ -508,6 +617,11 @@ class _FieldDescriptor:
                 self.data_dims = tuple(data_dims)
         else:
             self.data_dims = data_dims
+
+    # def __descriptor__(self):
+    #     shape = [dace.symbol(f"__sym_{next(sym_ctr)}_{ax}_size") for ax in self.axes]
+    #     strides = [dace.symbol(f"__sym_{next(sym_ctr)}_{ax}_stride") for ax in self.axes]
+    #     return dace.data.Array(shape=shape, strides=strides, dtype=dace.typeclass(str(self.dtype)))
 
     def __repr__(self):
         args = f"dtype={repr(self.dtype)}, axes={repr(self.axes)}, data_dims={repr(self.data_dims)}"
