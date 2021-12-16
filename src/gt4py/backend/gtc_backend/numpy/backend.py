@@ -28,6 +28,12 @@ from gtc.gtir_to_oir import GTIRToOIR
 from gtc.numpy import npir
 from gtc.numpy.npir_codegen import NpirCodegen
 from gtc.numpy.oir_to_npir import OirToNpir
+from gtc.passes.oir_optimizations.horizontal_execution_merging import OnTheFlyMerging
+from gtc.passes.oir_optimizations.inlining import MaskInlining
+from gtc.passes.oir_optimizations.temporaries import (
+    LocalTemporariesToScalars,
+    WriteBeforeReadTemporariesToScalars,
+)
 from gtc.passes.oir_optimizations.caches import (
     FillFlushToLocalKCaches,
     IJCacheDetection,
@@ -133,6 +139,10 @@ class GTCNumpyBackend(BaseBackend, CLIBackendMixin):
             "oir_pipeline",
             DefaultPipeline(
                 skip=[
+                    LocalTemporariesToScalars,
+                    WriteBeforeReadTemporariesToScalars,
+                    OnTheFlyMerging,
+                    MaskInlining,
                     IJCacheDetection,
                     KCacheDetection,
                     PruneKCacheFills,
