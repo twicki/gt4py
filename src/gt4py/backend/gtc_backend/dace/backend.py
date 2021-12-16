@@ -223,7 +223,6 @@ class GTCDaCeExtGenerator:
             tmp_sdfg.transformation_hist = []
             tmp_sdfg.orig_sdfg = None
 
-        sources: Dict[str, Dict[str, str]]
         if not self.backend.builder.options.backend_opts.get("disable_code_generation", False):
             with dace.config.set_temporary("compiler", "cuda", "max_concurrent_streams", value=-1):
                 implementation = DaCeComputationCodegen.apply(gtir, sdfg)
@@ -231,13 +230,16 @@ class GTCDaCeExtGenerator:
             bindings = DaCeBindingsCodegen.apply(
                 gtir, sdfg, module_name=self.module_name, backend=self.backend
             )
+            bindings_ext = ".cu" if self.backend.storage_info["device"] == "gpu" else ".cpp"
 
-        bindings_ext = ".cu" if self.backend.storage_info["device"] == "gpu" else ".cpp"
+            computation = {"computation.hpp": implementation}
+            bindings = {"bindings" + bindings_ext: bindings}
+        else:
+            computation = bindings = {}
+
         return {
-            "computation": {
-                "computation.hpp": implementation,
-            },
-            "bindings": {"bindings" + bindings_ext: bindings},
+            "computation": computation,
+            "bindings": bindings,
             "info": {
                 self.backend.builder.module_name + ".sdfg": dumps(sdfg.to_json()),
             },
