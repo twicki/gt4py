@@ -17,13 +17,14 @@
 import functools
 import textwrap
 from dataclasses import dataclass, field
-from typing import Any, Collection, Dict, Optional, Tuple, Union
+from typing import Any, Collection, Dict, Optional, Tuple, Union, cast
 
 from eve.codegen import FormatTemplate, JinjaTemplate, TemplatedGenerator
 from eve.visitors import NodeVisitor
 from gt4py.definitions import Extent
 from gtc import common
 from gtc.numpy import npir
+from gtc.passes import utils
 
 
 __all__ = ["NpirCodegen"]
