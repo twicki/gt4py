@@ -178,8 +178,8 @@ class FrozenStencil(SDFGConvertible):
                 for fsym in sym.free_symbols:
                     if sdfg.parent_nsdfg_node is not None:
                         sdfg.parent_nsdfg_node.symbol_mapping[str(fsym)] = fsym
-                    if fsym not in sdfg.symbols:
-                        if fsym in sdfg.parent_sdfg.symbols:
+                    if str(fsym) not in sdfg.symbols:
+                        if str(fsym) in sdfg.parent_sdfg.symbols:
                             sdfg.add_symbol(str(fsym), stype=sdfg.parent_sdfg.symbols[str(fsym)])
                         else:
                             sdfg.add_symbol(str(fsym), stype=dace.dtypes.int32)
@@ -695,7 +695,6 @@ class StencilObject(abc.ABC, dace.frontend.python.common.SDFGConvertible):
 
         if exec_info is not None:
             exec_info["call_run_end_time"] = time.perf_counter()
-
 
     @staticmethod
     def _get_domain_origin_key(domain, origin):
