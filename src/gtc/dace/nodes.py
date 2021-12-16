@@ -166,14 +166,11 @@ class VerticalLoopLibraryNode(OIRLibraryNode):
             or self.caches != other.caches
             or len(self.sections) != len(other.sections)
         ):
-             return False
+            return False
         for (interval1, he_sdfg1), (interval2, he_sdfg2) in zip(self.sections, other.sections):
-            if (
-                interval1 != interval2 or
-                not assert_sdfg_equal(he_sdfg1, he_sdfg2)
-            ):
+            if interval1 != interval2 or not assert_sdfg_equal(he_sdfg1, he_sdfg2):
                 return False
-
+        return True
 
     def __hash__(self):
         return super(OIRLibraryNode, self).__hash__()
