@@ -656,9 +656,7 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
     default_tile_sizes = (64, 8)
 
     def get_tiled_subset_strs(self, nsdfg, iteration_space):
-        iter_bounds = (iteration_space.i_interval.start, iteration_space.j_interval.start)
         tile_sizes = self.node.tile_sizes or self.default_tile_sizes
-        names = {*nsdfg.in_connectors, *nsdfg.out_connectors}
 
         # collect inner subsets
         inner_subsets: Dict[str, dace.subsets.Subset] = dict()
