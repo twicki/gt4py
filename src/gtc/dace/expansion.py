@@ -237,6 +237,33 @@ class TaskletCodegen(codegen.TemplatedGenerator):
             clauses.append(f"{index_symbols[1]} < {jmax}")
         return " and ".join(clauses)
 
+    def visit_For(self, node: oir.For, **kwargs: Any):
+        """Generate a plain-python for loop that will be translated to cpp/cuda.
+        This is a low-tech version. A better solution would be to actually express
+        the for loop in SDFGs so we can have it part of the optimisation in a more
+        significant way.
+        """
+        start = self.visit(node.start, **kwargs)
+        end = self.visit(node.end, **kwargs)
+        cond = f"for {node.target_name} in range({start},{end}):"
+        indent = "    "
+        body = self.visit(node.body, **kwargs)
+        body = [indent + b for b in body]
+        code_as_str = "\n".join([cond] + body)
+        return code_as_str
+
+    def visit_While(self, node: oir.While, **kwargs: Any):
+        body = self.visit(node.body, **kwargs)
+        cond = self.visit(node.cond, is_target=False, **kwargs)
+        init = "num_iter = 0"
+        max_iter = 1000
+        cond += f" and (num_iter < {max_iter})"
+        body.append("num_iter += 1")
+        indent = " " * 4
+        delim = f"\n{indent}"
+        code_as_str = f"{init}\nwhile {cond}:\n{indent}{delim.join(body)}"
+        return code_as_str
+
     class RemoveCastInIndexVisitor(eve.NodeTranslator):
         def visit_FieldAccess(self, node: oir.FieldAccess):
             if node.data_index:
