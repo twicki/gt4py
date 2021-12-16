@@ -168,8 +168,13 @@ class MaskBlock(VectorStmt):
     horiz_mask: Optional[HorizontalMask]
 
 
+class HorizontalMaskBlock(common.Stmt):
+    mask: HorizontalMask
+    body: List[VectorAssign]
+
+
 class HorizontalBlock(common.LocNode):
-    body: List[VectorStmt]
+    body: List[Union[VectorAssign, MaskBlock, HorizontalMaskBlock]]
 
 
 class VerticalPass(common.LocNode):
