@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Dict, Optional, Tuple, Type
 import dace
 import numpy as np
 from dace.serialize import dumps
-from dace.transformation import strict_transformations
 from dace.transformation.dataflow import MapCollapse
 
 import gt4py.definitions
@@ -46,6 +45,7 @@ from gtc.dace.utils import array_dimensions, replace_strides
 from gtc.passes.gtir_legacy_extents import compute_legacy_extents
 from gtc.passes.gtir_pipeline import GtirPipeline
 from gtc.passes.oir_optimizations.caches import FillFlushToLocalKCaches
+from gtc.passes.oir_optimizations.horizontal_execution_merging import GreedyMerging
 from gtc.passes.oir_pipeline import DefaultPipeline
 
 
@@ -191,7 +191,7 @@ class GTCDaCeExtGenerator:
         base_oir = gtir_to_oir.GTIRToOIR().visit(gtir)
         oir_pipeline = self.backend.builder.options.backend_opts.get(
             "oir_pipeline",
-            DefaultPipeline(skip=[FillFlushToLocalKCaches]),
+            DefaultPipeline(skip=[GreedyMerging, FillFlushToLocalKCaches]),
         )
         oir = oir_pipeline.run(base_oir)
         sdfg = OirSDFGBuilder().visit(oir)
