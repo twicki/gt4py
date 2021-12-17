@@ -46,7 +46,7 @@ def _get_offset_subset_str(origin, offset, dimensions, symbols="ij0"):
     for dim, var in enumerate(symbols):
         if not dimensions[dim]:
             continue
-        off = origin[dim] + offset[dim]
+        off = origin[dim] + (offset[dim] if offset[dim] else 0)
         subset_strs.append(f"{var}{off:+d}")
     return subset_strs
 
@@ -55,26 +55,22 @@ class TaskletCodegen(codegen.TemplatedGenerator):
 
     ScalarAccess = as_fmt("{name}")
 
-    def visit_FieldAccess(
-        self,
-        node: oir.FieldAccess,
-        *,
-        origins,
-        dimensions,
-        is_target,
-        targets,
-        region_fields,
-        index_symbols,
-        **kwargs,
-    ):
+    def visit_FieldAccess(self, node: oir.FieldAccess, **kwargs):
 
-        if (is_target or node.name in targets) and self.visit(node.offset) == "":
+        is_target: bool = kwargs.get("is_target", False)
+        targets: Set[str] = kwargs.get("targets", {})
+        origins: Dict[str, Tuple[int, ...]] = kwargs.get("origins", {})
+        dimensions: Dict[str, List[bool]] = kwargs.get("dimensions", {})
+        region_fields: Set[str] = kwargs.get("region_fields", {})
+        index_symbols: List[str] = kwargs.get("index_symbols", [])
+
+        if (is_target or node.name in targets) and self.visit(node.offset, **kwargs) == "":
             targets.add(node.name)
             name = "__" + node.name
         elif node.name in region_fields:
             name = node.name + "__"
         else:
-            name = node.name + "__" + self.visit(node.offset)
+            name = node.name + "__" + self.visit(node.offset, **kwargs)
 
         if node.name not in region_fields and not node.data_index:
             offset_str = ""
@@ -91,13 +87,13 @@ class TaskletCodegen(codegen.TemplatedGenerator):
                     symbols=index_symbols,
                 )
             if node.data_index:
-                offset_strs += list(self.visit(node.data_index))
+                offset_strs += list(self.visit(node.data_index, **kwargs))
             offset_str = ",".join(offset_strs)
             if offset_str:
                 offset_str = f"[{offset_str}]"
         return name + offset_str
 
-    def visit_CartesianOffset(self, node: common.CartesianOffset):
+    def visit_CartesianOffset(self, node: common.CartesianOffset, **kwargs: Any):
         res = []
         if node.i != 0:
             res.append(f'i{"m" if node.i<0 else "p"}{abs(node.i):d}')
@@ -106,6 +102,15 @@ class TaskletCodegen(codegen.TemplatedGenerator):
         if node.k != 0:
             res.append(f'k{"m" if node.k<0 else "p"}{abs(node.k):d}')
         return "_".join(res)
+
+    def visit_VariableKOffset(self, node: common.VariableKOffset, targets, **kwargs: Any):
+        k_offset = ""
+        if node.k:
+            k_offset = f"kp({self.visit(node.k, targets=targets, **kwargs)})"
+            # Treat variable offsets like assignments (targets)
+            if hasattr(node.k, "name"):
+                targets.add(node.k.name)
+        return k_offset
 
     def visit_AssignStmt(self, node: oir.AssignStmt, **kwargs):
         right = self.visit(node.right, is_target=False, **kwargs)
@@ -439,9 +444,9 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
             access_collection = get_access_collection(section)
             for name, offsets in access_collection.offsets().items():
                 for off in offsets:
-
+                    k_offset = off[2] if off[2] else 0
                     k_level = oir.AxisBound(
-                        level=interval.start.level, offset=interval.start.offset + off[2]
+                        level=interval.start.level, offset=interval.start.offset + k_offset
                     )
                     k_orig = min(k_origs.get(name, k_level), k_level)
                     k_origs[name] = k_orig
@@ -474,17 +479,17 @@ class NaiveVerticalLoopExpander(OIRLibraryNodeExpander):
                         -off[0] - he.iteration_space.i_interval.start.offset,
                         -off[1] - he.iteration_space.j_interval.start.offset,
                     )
+                    k_offset = off[2] if off[2] else 0
                     if name not in section_origins:
                         section_origins[name] = origin
                     if name not in min_k_offsets:
-                        min_k_offsets[name] = off[2]
+                        min_k_offsets[name] = k_offset
                     section_origins[name] = (
                         max(section_origins[name][0], origin[0]),
                         max(section_origins[name][1], origin[1]),
                     )
-                    min_k_offsets[name] = min(min_k_offsets[name], off[2])
+                    min_k_offsets[name] = min(min_k_offsets[name], k_offset)
         access_collection = get_access_collection(section, compensate_regions=True)
-        # access_collection = get_access_collection(section, compensate_regions=False)
         for name, section_origin in section_origins.items():
             vl_origin = self.compensated_origins[name]
             shape = section.arrays[name].shape
@@ -670,13 +675,12 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
                             )
                             offset.append(min(0, off))
                     else:
-                        # if acc.offset[dim] < 0:
                         offset.append(0)
-                        # offset.append(min(acc.offset[dim], 0))
                 offset.append(acc.offset[2])
             else:
                 offset = acc.offset
 
+            offset = (offset[0], offset[1], offset[2] if offset[2] else 0)
             origins.setdefault(acc.field, offset)
             origins[acc.field] = (
                 min(origins[acc.field][0], offset[0]),

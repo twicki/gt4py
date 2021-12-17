@@ -108,7 +108,7 @@ def get_tasklet_symbol(name, offset, is_target):
 
     acc_name = name + "__"
     suffix = "_".join(
-        var + ("m" if o < 0 else "p") + f"{abs(o):d}" for var, o in zip("ijk", offset) if o != 0
+        var + ("m" if off < 0 else "p") + f"{abs(off):d}" for var, off in zip("ijk", offset) if off
     )
     if suffix != "":
         acc_name += suffix
