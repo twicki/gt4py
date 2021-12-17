@@ -57,7 +57,7 @@ def _get_offset_suffix(node: Tuple[int, int, int]):
         res.append(f'i{"m" if node[0] < 0 else "p"}{abs(node[0]):d}')
     if node[1] != 0:
         res.append(f'j{"m" if node[1] < 0 else "p"}{abs(node[1]):d}')
-    if node[2] != 0:
+    if node[2] is not None and node[2] != 0:
         res.append(f'k{"m" if node[2] < 0 else "p"}{abs(node[2]):d}')
     return "_".join(res)
 
