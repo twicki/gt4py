@@ -112,7 +112,8 @@ class TaskletCodegen(codegen.TemplatedGenerator):
             k_offset = f"kp({self.visit(node.k, targets=targets, **kwargs)})"
             # Treat variable offsets like assignments (targets)
             if hasattr(node.k, "name"):
-                targets.add(node.k.name)
+                name = get_tasklet_symbol(node.k.name, (0, 0, 0), is_target=True)
+                targets.add(name)
         return k_offset
 
     def visit_AssignStmt(self, node: oir.AssignStmt, **kwargs):
