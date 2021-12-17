@@ -51,6 +51,17 @@ def _get_offset_subset_str(origin, offset, dimensions, symbols="ij0"):
     return subset_strs
 
 
+def _get_offset_suffix(node: Tuple[int, int, int]):
+    res = []
+    if node[0] != 0:
+        res.append(f'i{"m" if node[0] < 0 else "p"}{abs(node[0]):d}')
+    if node[1] != 0:
+        res.append(f'j{"m" if node[1] < 0 else "p"}{abs(node[1]):d}')
+    if node[2] != 0:
+        res.append(f'k{"m" if node[2] < 0 else "p"}{abs(node[2]):d}')
+    return "_".join(res)
+
+
 class TaskletCodegen(codegen.TemplatedGenerator):
 
     ScalarAccess = as_fmt("{name}")
@@ -64,11 +75,12 @@ class TaskletCodegen(codegen.TemplatedGenerator):
         region_fields: Set[str] = kwargs.get("region_fields", {})
         index_symbols: List[str] = kwargs.get("index_symbols", [])
 
-        if (is_target or node.name in targets) and self.visit(node.offset, **kwargs) == "":
+        if node.name in region_fields:
+            node.offset.to_tuple()
+            name = get_tasklet_symbol(node.name, (0, 0, node.offset.k), is_target)
+        elif (is_target or node.name in targets) and self.visit(node.offset, **kwargs) == "":
             targets.add(node.name)
             name = "__" + node.name
-        elif node.name in region_fields:
-            name = node.name + "__"
         else:
             name = node.name + "__" + self.visit(node.offset, **kwargs)
 
@@ -77,9 +89,7 @@ class TaskletCodegen(codegen.TemplatedGenerator):
         else:
             offset_strs = []
             if node.name in region_fields:
-                acc_name = (
-                    f"__{node.name}" if (is_target or node.name in targets) else f"{node.name}__"
-                )
+                acc_name = get_tasklet_symbol(node.name, (0, 0, node.offset.k), is_target)
                 offset_strs += _get_offset_subset_str(
                     origins[node.name],
                     node.offset.to_tuple(),
@@ -93,15 +103,8 @@ class TaskletCodegen(codegen.TemplatedGenerator):
                 offset_str = f"[{offset_str}]"
         return name + offset_str
 
-    def visit_CartesianOffset(self, node: common.CartesianOffset, **kwargs: Any):
-        res = []
-        if node.i != 0:
-            res.append(f'i{"m" if node.i<0 else "p"}{abs(node.i):d}')
-        if node.j != 0:
-            res.append(f'j{"m" if node.j<0 else "p"}{abs(node.j):d}')
-        if node.k != 0:
-            res.append(f'k{"m" if node.k<0 else "p"}{abs(node.k):d}')
-        return "_".join(res)
+    def visit_CartesianOffset(self, node: common.CartesianOffset, **kwargs):
+        return _get_offset_suffix(node.to_tuple())
 
     def visit_VariableKOffset(self, node: common.VariableKOffset, targets, **kwargs: Any):
         k_offset = ""
@@ -721,58 +724,60 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
 
         in_memlets = dict()
         for name, offsets in access_collection.read_offsets().items():
-            if name in region_accesses:
-                shape = [
-                    edge
-                    for edge in self.parent_state.in_edges(self.node)
-                    if edge.dst_conn == f"IN_{name}"
-                ][0].data.subset.bounding_box_size()
-                subset_str = ",".join(f"0:{s}" for s in shape)
-                in_memlets[name + "__"] = dace.memlet.Memlet.simple(
-                    name,
-                    subset_str,
-                    dynamic=True,
-                )
-            else:
-                dimensions = array_dimensions(self.parent_sdfg.arrays[name])
-                data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
-                origin = self.compensated_origins[name]
+            shape = [
+                edge
+                for edge in self.parent_state.in_edges(self.node)
+                if edge.dst_conn == f"IN_{name}"
+            ][0].data.subset.bounding_box_size()
+            dynamic_subset_strs = [f"0:{s}" for s in shape]
+            dimensions = array_dimensions(self.parent_sdfg.arrays[name])
+            data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
+            origin = self.compensated_origins[name]
 
-                for offset in offsets:
-                    subset_strs = _get_offset_subset_str(origin, offset, dimensions)
-                    subset_strs.extend(f"0:{dim}" for dim in data_dims)
-                    acc_name = get_tasklet_symbol(name, offset, is_target=False)
-                    in_memlets[acc_name] = dace.memlet.Memlet.simple(
-                        name,
-                        ",".join(subset_strs),
-                        dynamic=acc_name in dynamic_accesses,
+            for offset in offsets:
+                idx_subset_strs = _get_offset_subset_str(origin, offset, dimensions)
+                idx_subset_strs.extend(f"0:{dim}" for dim in data_dims)
+                if name in region_accesses:
+                    subset_strs = (
+                        dynamic_subset_strs[: sum(dimensions[:2])]
+                        + idx_subset_strs[sum(dimensions[:2]) :]
                     )
+                    acc_name = get_tasklet_symbol(name, (0, 0, offset[2]), is_target=False)
+                else:
+                    subset_strs = idx_subset_strs
+                    acc_name = get_tasklet_symbol(name, offset, is_target=False)
+                in_memlets[acc_name] = dace.memlet.Memlet.simple(
+                    name,
+                    ",".join(subset_strs),
+                    dynamic=acc_name in dynamic_accesses,
+                )
 
         out_memlets = dict()
         for name in access_collection.write_fields():
+            shape = [
+                edge
+                for edge in self.parent_state.out_edges(self.node)
+                if edge.src_conn == f"OUT_{name}"
+            ][0].data.subset.bounding_box_size()
+            dynamic_subset_strs = [f"0:{s}" for s in shape]
+            dimensions = array_dimensions(self.parent_sdfg.arrays[name])
+            data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
+            idx_subset_strs = _get_offset_subset_str(
+                self.compensated_origins[name], (0, 0, 0), dimensions
+            )
+            idx_subset_strs.extend(f"0:{dim}" for dim in data_dims)
             if name in region_accesses:
-                shape = [
-                    edge
-                    for edge in self.parent_state.out_edges(self.node)
-                    if edge.src_conn == f"OUT_{name}"
-                ][0].data.subset.bounding_box_size()
-                subset_str = ",".join(f"0:{s}" for s in shape)
-                out_memlets["__" + name] = dace.memlet.Memlet.simple(
-                    name,
-                    subset_str,
-                    dynamic=True,
+                subset_strs = (
+                    dynamic_subset_strs[: sum(dimensions[:2])]
+                    + idx_subset_strs[sum(dimensions[:2]) :]
                 )
             else:
-                dimensions = array_dimensions(self.parent_sdfg.arrays[name])
-                data_dims = self.parent_sdfg.arrays[name].shape[sum(dimensions) :]
-                subset_strs = _get_offset_subset_str(
-                    self.compensated_origins[name], (0, 0, 0), dimensions
-                )
-                subset_strs.extend(f"0:{dim}" for dim in data_dims)
-                acc_name = "__" + name
-                out_memlets[acc_name] = dace.memlet.Memlet.simple(
-                    name, ",".join(subset_strs), dynamic=acc_name in dynamic_accesses
-                )
+                subset_strs = idx_subset_strs
+
+            acc_name = "__" + name
+            out_memlets[acc_name] = dace.memlet.Memlet.simple(
+                name, ",".join(subset_strs), dynamic=acc_name in dynamic_accesses
+            )
         return in_memlets, out_memlets
 
     def add_nodes_and_edges(self):
@@ -792,14 +797,23 @@ class NaiveHorizontalExecutionExpander(OIRLibraryNodeExpander):
             name: array_dimensions(array) for name, array in self.parent_sdfg.arrays.items()
         }
         nonflat_dimensions = {}
+        access_collection = get_access_collection(self.node)
         for name, dims in dimensions.items():
-            if name + "__" in in_memlets:
-                in_dims = list(dims)
-                shape = iter(in_memlets[name + "__"].subset.bounding_box_size())
-                flat_dims = [i for i, d in enumerate(in_dims) if d and True == (next(shape) == 1)]
-                for i in flat_dims:
-                    in_dims[i] = False
-                nonflat_dimensions[f"{name}__"] = in_dims
+            if name in access_collection.read_offsets():
+                offsets = access_collection.read_offsets()[name]
+                k_offsets = set((0, 0, o[2]) for o in offsets)
+                for offset in k_offsets:
+
+                    acc_name = name + "__" + _get_offset_suffix(offset)
+                    if acc_name in in_memlets:
+                        in_dims = list(dims)
+                        shape = iter(in_memlets[acc_name].subset.bounding_box_size())
+                        flat_dims = [
+                            i for i, d in enumerate(in_dims) if d and True == (next(shape) == 1)
+                        ]
+                        for i in flat_dims:
+                            in_dims[i] = False
+                        nonflat_dimensions[acc_name] = in_dims
             if "__" + name in out_memlets:
                 out_dims = list(dims)
                 shape = iter(out_memlets["__" + name].subset.bounding_box_size())
@@ -1027,7 +1041,7 @@ class BlockVerticalLoopExpander(NaiveVerticalLoopExpander):
 
         for node, _ in nsdfg.sdfg.all_nodes_recursive():
             if isinstance(node, HorizontalExecutionLibraryNode):
-                node.index_symbols = ["(tile_i+i)", "(tile_j+j)"]
+                node.index_symbols = ["(tile_i+i)", "(tile_j+j)", "0"]
                 node.global_domain_symbols = ["__global_I", "__global_J"]
             elif isinstance(node, dace.nodes.NestedSDFG):
                 node.symbol_mapping["tile_i"] = tile_i_sym
