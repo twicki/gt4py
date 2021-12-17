@@ -1276,6 +1276,54 @@ class TestRegionWithIfRegionInside(gt_testing.StencilTestSuite):
         out_field[3:-2, :, :] = np.where(cond[3:-2, :, :] > 0, 7.0, out_field[3:-2, :, :])
 
 
+class TestRegionWithTwoKOffsetsOffsetOutputMemlet(gt_testing.StencilTestSuite):
+    dtypes = {
+        "inout_field": np.float64,
+    }
+    domain_range = [(3, 3), (5, 5), (10, 10)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "inout_field": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(inout_field):
+        with computation(FORWARD):
+            with interval(1, None):
+                with horizontal(region[:, 1:-1]):
+                    inout_field = inout_field[0, 0, -1]
+                    inout_field += inout_field
+
+    def validation(inout_field, *, domain, origin):
+        # fact = np.reshape(, (1, 1, domain[2]))
+        inout_field[:, 1:-1, 1:] = (
+            inout_field[:, 1:-1, 0:1] * (2 ** np.arange(domain[2]))[np.newaxis, np.newaxis, 1:]
+        )
+
+
+class TestRegionWithTwoKOffsetsOffsetInputMemlet(gt_testing.StencilTestSuite):
+    dtypes = {
+        "inout_field": np.float64,
+    }
+    domain_range = [(3, 3), (5, 5), (10, 10)]
+    backends = INTERNAL_BACKENDS
+    symbols = {
+        "inout_field": gt_testing.field(
+            in_range=(0.1, 10), axes="IJK", boundary=[(0, 0), (0, 0), (0, 0)]
+        ),
+    }
+
+    def definition(inout_field):
+        with computation(FORWARD):
+            with interval(0, -1):
+                with horizontal(region[:, 1:-1]):
+                    inout_field = inout_field[0, 0, 1]
+
+    def validation(inout_field, *, domain, origin):
+        inout_field[:, 1:-1, :-1] = inout_field[:, 1:-1, 1:]
+
+
 class TestVariableKRead(gt_testing.StencilTestSuite):
     dtypes = {
         "field_in": np.float32,
