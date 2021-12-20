@@ -107,13 +107,14 @@ class TaskletCodegen(codegen.TemplatedGenerator):
         return _get_offset_suffix(node.to_tuple())
 
     def visit_VariableKOffset(self, node: common.VariableKOffset, targets, **kwargs: Any):
-        k_offset = ""
+        k_offset: str = ""
         if node.k:
             k_offset = f"kp({self.visit(node.k, targets=targets, **kwargs)})"
             # Treat variable offsets like assignments (targets)
             if hasattr(node.k, "name"):
-                name = get_tasklet_symbol(node.k.name, (0, 0, 0), is_target=True)
-                targets.add(name)
+                target_name = node.k.name
+                get_tasklet_symbol(target_name, (0, 0, 0), is_target=True)
+                targets.add(target_name)
         return k_offset
 
     def visit_AssignStmt(self, node: oir.AssignStmt, **kwargs):
