@@ -260,6 +260,7 @@ class Storage(np.ndarray):
             strides=[s // self.itemsize for s in self.strides],
             dtype=dace.typeclass(str(self.dtype)),
             storage=storage,
+            transient=hasattr(self, "_istransient"),
         )
         descriptor.default_origin = self.default_origin
         return descriptor
