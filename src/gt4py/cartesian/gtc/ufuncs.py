@@ -63,4 +63,4 @@ isnan: np.ufunc = np.isnan
 floor: np.ufunc = np.floor
 ceil: np.ufunc = np.ceil
 trunc: np.ufunc = np.trunc
-int: np.ufunc = np.int32  # noqa: A001 [builtin-variable-shadowing]
+int: np.signedinteger = np.int32  # noqa: A001 [builtin-variable-shadowing]

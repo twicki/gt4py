@@ -417,7 +417,7 @@ class NativeFunction(enum.Enum):
     FLOOR = enum.auto()
     CEIL = enum.auto()
     TRUNC = enum.auto()
-    
+
     INT = enum.auto()
 
     @property
