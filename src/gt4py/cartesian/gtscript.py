@@ -645,7 +645,7 @@ class IteratorAccess:
     def __init__(self, name: str):
         assert name
         self.name = name
-        self._gtscript_ = {"nonlocals": {}, "imported": {}}
+        self._gtscript_: dict[str, dict] = {"nonlocals": {}, "imported": {}}
 
 
 THIS_K = IteratorAccess("K")
