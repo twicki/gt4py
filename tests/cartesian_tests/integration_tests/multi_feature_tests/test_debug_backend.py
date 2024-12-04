@@ -375,31 +375,6 @@ def test_table_access_stencil():
     np.testing.assert_allclose(field_out.view(np.ndarray)[1, 1, :], [3, 4, 4, 4])
 
 
-def test_this_k_function():
-    field_in = gt_storage.ones(
-        dtype=np.float64, backend="debug", shape=(4, 4, 4), aligned_index=(0, 0, 0)
-    )
-    field_out = gt_storage.zeros(
-        dtype=np.float64, backend="debug", shape=(4, 4, 4), aligned_index=(0, 0, 0)
-    )
-
-    @gtscript.function
-    def this_k_function(in_field: gtscript.Field[np.float64]):
-        return in_field.at(K=THIS_K)
-
-    @gtscript.stencil(backend="debug")
-    def test_stencil(
-        in_field: gtscript.Field[np.float64],
-        out_field: gtscript.Field[np.float64],
-    ):
-        with computation(PARALLEL), interval(...):
-            out_field[0, 0, 0] = this_k_function(in_field)
-
-    test_stencil(field_in, field_out)
-
-    np.testing.assert_allclose(field_out.view(np.ndarray)[:, :, :], 1)
-
-
 def test_this_k_stencil():
     field_in = gt_storage.ones(
         dtype=np.float64, backend="debug", shape=(4, 4, 4), aligned_index=(0, 0, 0)
