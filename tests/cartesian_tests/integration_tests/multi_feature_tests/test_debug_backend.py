@@ -374,6 +374,7 @@ def test_table_access_stencil():
 
     np.testing.assert_allclose(field_out.view(np.ndarray)[1, 1, :], [3, 4, 4, 4])
 
+
 def test_this_k_stencil():
     field_in = gt_storage.ones(
         dtype=np.float64, backend="debug", shape=(4, 4, 4), aligned_index=(0, 0, 0)
