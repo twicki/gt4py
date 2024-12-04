@@ -388,8 +388,9 @@ def test_this_k_stencil():
         in_field: gtscript.Field[np.float64],
         out_field: gtscript.Field[np.float64],
     ):
-        tmp = THIS_K
-        out_field[0, 0, 0] = in_field.at(K=tmp)
+        with computation(PARALLEL), interval(...):
+            tmp = THIS_K
+            out_field[0, 0, 0] = in_field.at(K=tmp)
 
     test_stencil(field_in, field_out)
 
