@@ -2042,6 +2042,7 @@ class GTScriptParser(ast.NodeVisitor):
                     nested_inlined_values = {
                         "{}.{}".format(value._gtscript_["qualified_name"], item_name): item_value
                         for item_name, item_value in value._gtscript_["nonlocals"].items()
+                        if item_name != "THIS_K"
                     }
                     resolved_values_list.extend(nested_inlined_values.items())
 
