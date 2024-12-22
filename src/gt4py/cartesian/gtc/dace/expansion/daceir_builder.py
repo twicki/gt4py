@@ -377,6 +377,7 @@ class DaCeIRBuilder(eve.NodeTranslator):
                         targets=targets,
                         var_offset_fields=var_offset_fields,
                         K_write_with_offset=K_write_with_offset,
+                        absolute_K_access_fields=absolute_K_access_fields,
                         **kwargs,
                     )
                 else:
@@ -386,6 +387,7 @@ class DaCeIRBuilder(eve.NodeTranslator):
                         targets=targets,
                         var_offset_fields=var_offset_fields,
                         K_write_with_offset=K_write_with_offset,
+                        absolute_K_access_fields=absolute_K_access_fields,
                         **kwargs,
                     )
                 res = dcir.IndexAccess(
