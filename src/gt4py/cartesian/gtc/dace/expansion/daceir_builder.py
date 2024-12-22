@@ -923,3 +923,14 @@ class DaCeIRBuilder(eve.NodeTranslator):
             write_memlets=[memlet for memlet in field_memlets if memlet.field in write_fields],
             symbol_decls=list(symbol_collector.symbol_decls.values()),
         )
+
+    def visit_IteratorAccess(
+        self,
+        iterator_access: oir.IteratorAccess,
+        *,
+        symbol_collector: DaCeIRBuilder.SymbolCollector,
+        **kwargs,
+    ) -> dcir.ScalarAccess:
+        dtype = common.DataType.INT32
+        symbol_collector.add_symbol(iterator_access.name, dtype=dtype)
+        return dcir.ScalarAccess(name=iterator_access.name, dtype=dtype)
