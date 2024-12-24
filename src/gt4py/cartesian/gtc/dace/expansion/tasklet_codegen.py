@@ -27,7 +27,7 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
 
     def _visit_offset(
         self,
-        node: Union[dcir.VariableKOffset, common.CartesianOffset],
+        node: Union[common.VariableKOffset, common.CartesianOffset],
         *,
         access_info: dcir.FieldAccessInfo,
         decl: dcir.FieldDecl,
