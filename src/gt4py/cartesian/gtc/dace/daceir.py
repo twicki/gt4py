@@ -737,12 +737,16 @@ class VariableKOffset(common.VariableKOffset[Expr]):
     pass
 
 
+class AbsoluteKIndex(common.AbsoluteKIndex[Expr]):
+    pass
+
+
 class IndexAccess(common.FieldAccess, Expr):
     offset: Optional[
         Union[
             common.CartesianOffset,
             VariableKOffset,
-            common.AbsoluteKIndex,
+            AbsoluteKIndex,
             Literal,
             ScalarAccess,  # For field index
         ]

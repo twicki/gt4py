@@ -63,7 +63,7 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
     def visit_CartesianOffset(self, node: common.CartesianOffset, **kwargs):
         return self._visit_offset(node, **kwargs)
 
-    def visit_VariableKOffset(self, node: common.CartesianOffset, **kwargs):
+    def visit_VariableKOffset(self, node: common.VariableKOffset, **kwargs):
         return self._visit_offset(node, **kwargs)
 
     def visit_AbsoluteKIndex(self, node: common.AbsoluteKIndex, **kwargs):
@@ -92,22 +92,50 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
                 "Memlet connector and tasklet variable mismatch, DaCe IR error."
             ) from None
 
+        # Are we still on grid-point access (I.shape==1)
+        # or are we considering the array entirely (I.shape > 1)
+        memlet_accessed_as_full_array = memlet.access_info.shape[0] != 1
         index_strs = []
-        if node.offset is not None:
-            index_strs.append(
-                self.visit(
-                    node.offset,
-                    decl=symtable[memlet.field],
-                    access_info=memlet.access_info,
-                    symtable=symtable,
-                    in_idx=True,
-                    **kwargs,
-                )
+        if memlet_accessed_as_full_array:
+            # Full array access with every dimensions accessed in full
+            # everything was packed in `data_index` in `DaCeIRBuilder.visit_HorizontalExecution`
+            # along the `reshape_memlet=True` code path
+            assert len(node.data_index) == len(sdfg_ctx.sdfg.arrays[memlet.field].shape)
+            assert len(node.data_index) > 3  # All the cartesian dims, and then some
+            # IJ resolve
+            index_strs = [
+                self.visit(node.data_index[0], in_idx=True, **kwargs),
+                self.visit(node.data_index[1], in_idx=True, **kwargs),
+            ]
+            # K resolve (as a relative or absolute indexing)
+            rel_off = "__k+"
+            if isinstance(node.offset, dcir.AbsoluteKIndex):
+                rel_off = ""
+            index_strs.append(f"{rel_off}{self.visit(node.data_index[2],  in_idx=True, **kwargs)}")
+            # Data dimensions (as absolute index)
+            index_strs.extend(
+                self.visit(idx, sdfg_ctx=sdfg_ctx, symtable=symtable, in_idx=True, **kwargs)
+                for idx in node.data_index[3:]
             )
-        index_strs.extend(
-            self.visit(idx, sdfg_ctx=sdfg_ctx, symtable=symtable, in_idx=True, **kwargs)
-            for idx in node.data_index
-        )
+        else:
+            # Grid-point access, I & J are unitary, K can be offseted with variable
+            # Resolve K offset (also resolves I & J)
+            if node.offset is not None:
+                index_strs.append(
+                    self.visit(
+                        node.offset,
+                        decl=symtable[memlet.field],
+                        access_info=memlet.access_info,
+                        symtable=symtable,
+                        in_idx=True,
+                        **kwargs,
+                    )
+                )
+            # Add any data dimensions
+            index_strs.extend(
+                self.visit(idx, sdfg_ctx=sdfg_ctx, symtable=symtable, in_idx=True, **kwargs)
+                for idx in node.data_index
+            )
         return f"{node.name}[{','.join(index_strs)}]"
 
     def visit_AssignStmt(self, node: dcir.AssignStmt, **kwargs):

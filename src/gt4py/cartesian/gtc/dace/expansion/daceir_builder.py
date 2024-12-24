@@ -311,6 +311,9 @@ class DaCeIRBuilder(eve.NodeTranslator):
     def visit_VariableKOffset(self, node: oir.VariableKOffset, **kwargs):
         return dcir.VariableKOffset(k=self.visit(node.k, **kwargs))
 
+    def visit_AbsoluteKIndex(self, node: oir.AbsoluteKIndex, **kwargs):
+        return dcir.AbsoluteKIndex(k=self.visit(node.k, **kwargs))
+
     def visit_LocalScalar(self, node: oir.LocalScalar, **kwargs: Any) -> dcir.LocalScalarDecl:
         return dcir.LocalScalarDecl(name=node.name, dtype=node.dtype)
 
@@ -355,45 +358,33 @@ class DaCeIRBuilder(eve.NodeTranslator):
                 node.name in targets and node.offset == common.CartesianOffset.zero()
             )
             name = get_tasklet_symbol(node.name, node.offset, is_target=is_target)
-            if node.data_index:
-                if isinstance(node.offset, common.AbsoluteKIndex):
-                    raise RuntimeError("Absolute K indexing cannot work with data index")
-                res = dcir.IndexAccess(
-                    name=name,
-                    offset=None,
-                    data_index=node.data_index,
-                    dtype=node.dtype,
-                )
-            elif node.name in absolute_K_access_fields:
+            if node.name in absolute_K_access_fields:
                 # Two cases:
                 #   - we are accessing in absolute K - and need to resolve that index (offset.k)
                 #   - we are NOT accessing in absolute K for this access, but the field will be
                 #     before or after, and we need to revolve it as an IndexAccess rather than
                 #     a scalar access
-                if isinstance(node.offset, common.AbsoluteKIndex):
-                    offset = self.visit(
-                        node.offset.k,
-                        is_target=is_target,
-                        targets=targets,
-                        var_offset_fields=var_offset_fields,
-                        K_write_with_offset=K_write_with_offset,
-                        absolute_K_access_fields=absolute_K_access_fields,
-                        **kwargs,
-                    )
-                else:
-                    offset = self.visit(
-                        node.offset,
-                        is_target=is_target,
-                        targets=targets,
-                        var_offset_fields=var_offset_fields,
-                        K_write_with_offset=K_write_with_offset,
-                        absolute_K_access_fields=absolute_K_access_fields,
-                        **kwargs,
-                    )
+                offset = self.visit(
+                    node.offset,
+                    is_target=is_target,
+                    targets=targets,
+                    var_offset_fields=var_offset_fields,
+                    K_write_with_offset=K_write_with_offset,
+                    absolute_K_access_fields=absolute_K_access_fields,
+                    **kwargs,
+                )
                 res = dcir.IndexAccess(
                     name=name,
                     offset=offset,
-                    data_index=[],
+                    data_index=node.data_index,
+                    dtype=node.dtype,
+                )
+            elif node.data_index:
+                # No offset - but a data dimension
+                res = dcir.IndexAccess(
+                    name=name,
+                    offset=None,
+                    data_index=node.data_index,
                     dtype=node.dtype,
                 )
             else:
@@ -532,7 +523,19 @@ class DaCeIRBuilder(eve.NodeTranslator):
                 reshape_memlet = False
                 for access_node in dcir_node.walk_values().if_isinstance(dcir.IndexAccess):
                     if access_node.data_index and access_node.name == memlet.connector:
-                        access_node.data_index = memlet_data_index + access_node.data_index
+                        # Order matters!
+                        # Seperate between case where K is offset or absolute and
+                        # where it's a regular offset (should be in memlet_data_index)
+                        if isinstance(
+                            access_node.offset, (dcir.VariableKOffset, dcir.AbsoluteKIndex)
+                        ):
+                            access_node.data_index = [
+                                *memlet_data_index,  # IJ - enforced by the fact offset is on K
+                                access_node.offset.k,  # Visitable K offset
+                                *access_node.data_index,  # Extra dims
+                            ]
+                        else:
+                            access_node.data_index = memlet_data_index + access_node.data_index
                         assert len(access_node.data_index) == array_ndims
                         reshape_memlet = True
                 if reshape_memlet:
