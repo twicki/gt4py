@@ -15,18 +15,16 @@ from gt4py.cartesian.gtscript import (
     __INLINED,
     BACKWARD,
     FORWARD,
+    IJ,
     PARALLEL,
     Field,
     GlobalTable,
     I,
     J,
-    K,
     computation,
     horizontal,
     interval,
     region,
-    K_at,
-    IJ,
 )
 from gt4py.storage.cartesian import utils as storage_utils
 
