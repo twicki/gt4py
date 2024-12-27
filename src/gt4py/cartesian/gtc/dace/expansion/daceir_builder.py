@@ -537,9 +537,7 @@ class DaCeIRBuilder(eve.NodeTranslator):
                             )
                         # Seperate between case where K is offset or absolute and
                         # where it's a regular offset (should be dealt with the above memlet_data_index)
-                        if isinstance(
-                            access_node.offset, (dcir.VariableKOffset, dcir.AbsoluteKIndex)
-                        ):
+                        if access_node.offset:
                             access_node.explicit_indices.append(access_node.offset)
                         # Add any remaining data dimensions indexing
                         for data_index in access_node.data_index:
