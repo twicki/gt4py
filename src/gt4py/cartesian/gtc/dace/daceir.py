@@ -751,6 +751,7 @@ class IndexAccess(common.FieldAccess, Expr):
             ScalarAccess,  # For field index
         ]
     ]
+    use_explicit_indices: bool = False  # Access as a full field w/ explicit indices
 
     @datamodels.validator("offset")
     def offset_is_integer(self, attribute: datamodels.Attribute, v: Expr) -> None:

@@ -544,6 +544,7 @@ class DaCeIRBuilder(eve.NodeTranslator):
                         symbol_collector.add_symbol(sym)
                     # set full shape on memlet
                     memlet.access_info = global_ctx.library_node.access_infos[memlet.field]
+                    access_node.use_explicit_indices = True
 
         for item in reversed(expansion_items):
             iteration_ctx = iteration_ctx.pop()

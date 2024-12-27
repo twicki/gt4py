@@ -92,13 +92,8 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
                 "Memlet connector and tasklet variable mismatch, DaCe IR error."
             ) from None
 
-        # Are we still on grid-point access (I.shape==1)
-        # or are we considering the array entirely (I.shape > 1)
-        memlet_accessed_as_full_array = (
-            memlet.access_info.dynamic_access and memlet.access_info.shape[0] != 1
-        )
         index_strs = []
-        if memlet_accessed_as_full_array:
+        if node.use_explicit_indices:
             # Full array access with every dimensions accessed in full
             # everything was packed in `data_index` in `DaCeIRBuilder.visit_HorizontalExecution`
             # along the `reshape_memlet=True` code path
