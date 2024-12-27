@@ -60,15 +60,24 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
         res = dace.subsets.Range([r for i, r in enumerate(ranges.ranges) if int_sizes[i] != 1])
         return str(res)
 
-    def visit_CartesianOffset(self, node: common.CartesianOffset, **kwargs):
-        return self._visit_offset(node, **kwargs)
+    def visit_CartesianOffset(self, node: common.CartesianOffset, explicit=False, **kwargs):
+        # If called from the explicit pass we need to be add manually the relative indexing
+        if explicit:
+            return f"__k+{self.visit(node.k, **kwargs)}"
+        else:
+            return self._visit_offset(node, **kwargs)
 
-    def visit_VariableKOffset(self, node: common.VariableKOffset, **kwargs):
-        return self._visit_offset(node, **kwargs)
+    def visit_VariableKOffset(self, node: common.VariableKOffset, explicit=False, **kwargs):
+        # If called from the explicit pass we need to be add manually the relative indexing
+        if explicit:
+            return f"__k+{self.visit(node.k, **kwargs)}"
+        else:
+            return self._visit_offset(node, **kwargs)
 
     def visit_AbsoluteKIndex(self, node: common.AbsoluteKIndex, **kwargs):
-        idx = self.visit(self.visit(node.k))
-        return str(idx)
+        # Unlike other offsets - absolute is _always_ explicit we just have to resolve
+        # the index
+        return str(self.visit(node.k, **kwargs))
 
     def visit_IndexAccess(
         self,
@@ -93,27 +102,22 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
             ) from None
 
         index_strs = []
-        if node.use_explicit_indices:
+        if node.explicit_indices:
             # Full array access with every dimensions accessed in full
-            # everything was packed in `data_index` in `DaCeIRBuilder.visit_HorizontalExecution`
+            # everything was packed in `explicit_indices` in `DaCeIRBuilder.visit_HorizontalExecution`
             # along the `reshape_memlet=True` code path
-            assert len(node.data_index) == len(sdfg_ctx.sdfg.arrays[memlet.field].shape)
-            assert len(node.data_index) > 3  # All the cartesian dims, and then some
-            # IJ resolve
-            index_strs = [
-                self.visit(node.data_index[0], in_idx=True, **kwargs),
-                self.visit(node.data_index[1], in_idx=True, **kwargs),
-            ]
-            # K resolve (as a relative or absolute indexing)
-            rel_off = "__k+"
-            if isinstance(node.offset, dcir.AbsoluteKIndex):
-                rel_off = ""
-            index_strs.append(f"{rel_off}{self.visit(node.data_index[2],  in_idx=True, **kwargs)}")
-            # Data dimensions (as absolute index)
-            index_strs.extend(
-                self.visit(idx, sdfg_ctx=sdfg_ctx, symtable=symtable, in_idx=True, **kwargs)
-                for idx in node.data_index[3:]
-            )
+            assert len(node.explicit_indices) == len(sdfg_ctx.sdfg.arrays[memlet.field].shape)
+            for idx in node.explicit_indices:
+                index_strs.append(
+                    self.visit(
+                        idx,
+                        sdfg_ctx=sdfg_ctx,
+                        symtable=symtable,
+                        in_idx=True,
+                        explicit=True,
+                        **kwargs,
+                    )
+                )
         else:
             # Grid-point access, I & J are unitary, K can be offseted with variable
             # Resolve K offset (also resolves I & J)
