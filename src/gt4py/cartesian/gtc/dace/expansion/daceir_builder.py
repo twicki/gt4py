@@ -949,6 +949,5 @@ class DaCeIRBuilder(eve.NodeTranslator):
         symbol_collector: DaCeIRBuilder.SymbolCollector,
         **kwargs,
     ) -> dcir.ScalarAccess:
-        dtype = common.DataType.INT32
-        symbol_collector.add_symbol(iterator_access.name, dtype=dtype)
-        return dcir.ScalarAccess(name=iterator_access.name, dtype=dtype)
+        symbol_name = f"__{iterator_access.name.lower()}"
+        return dcir.ScalarAccess(name=symbol_name, dtype=iterator_access.dtype)
