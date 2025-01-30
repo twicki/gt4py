@@ -99,10 +99,13 @@ def compute_min_k_size(node: gtir.Stencil) -> int:
             vloop.interval.start.level == LevelMarker.START
             and vloop.interval.end.level == LevelMarker.END
         ):
-            biggest_offset = max(
-                biggest_offset,
-                vloop.interval.start.offset - vloop.interval.end.offset + 1,
-            )
+            if not (
+                vloop.interval.start.offset == 0 and vloop.interval.end.offset == 0
+            ):
+                biggest_offset = max(
+                    biggest_offset,
+                    vloop.interval.start.offset - vloop.interval.end.offset + 1,
+                )
         elif (
             vloop.interval.start.level == LevelMarker.START
             and vloop.interval.end.level == LevelMarker.START
