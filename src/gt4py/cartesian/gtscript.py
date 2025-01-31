@@ -107,7 +107,12 @@ builtins = {
     *builtins_and_inline_ignore,
 }
 
-IGNORE_WHEN_INLINING = {*MATH_BUILTINS, *TYPE_HINT_AND_CAST_BUILTINS, *builtins_and_inline_ignore, "range"}
+IGNORE_WHEN_INLINING = {
+    *MATH_BUILTINS,
+    *TYPE_HINT_AND_CAST_BUILTINS,
+    *builtins_and_inline_ignore,
+    "range",
+}
 
 __all__ = [*list(builtins), "function", "stencil", "lazy_stencil"]
 

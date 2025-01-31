@@ -106,7 +106,6 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
             # Full array access with every dimensions accessed in full
             # everything was packed in `explicit_indices` in `DaCeIRBuilder.visit_HorizontalExecution`
             # along the `reshape_memlet=True` code path
-            assert len(node.explicit_indices) == len(sdfg_ctx.sdfg.arrays[memlet.field].shape)
             for idx in node.explicit_indices:
                 index_strs.append(
                     self.visit(
@@ -133,8 +132,7 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
                 )
             # Add any data dimensions
             index_strs.extend(
-                self.visit(idx, symtable=symtable, in_idx=True, **kwargs)
-                for idx in node.data_index
+                self.visit(idx, symtable=symtable, in_idx=True, **kwargs) for idx in node.data_index
             )
         return f"{node.name}[{','.join(index_strs)}]"
 
