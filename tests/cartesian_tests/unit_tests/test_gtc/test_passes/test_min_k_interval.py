@@ -159,14 +159,12 @@ def stencil_with_extent_6(field_a: gs.Field[float], field_b: gs.Field[float]):
         field_a = field_b[0, 0, -5] + field_b[0, 0, 3]
 
 
-@pytest.mark.parametrize(
-    "definition,expected_k_bounds", [(s, d["k_bounds"]) for s, d in test_data]
-)
+@pytest.mark.parametrize("definition,expected_k_bounds", [(s, d["k_bounds"]) for s, d in test_data])
 def test_k_bounds(definition, expected_k_bounds):
     builder = StencilBuilder(definition, backend=from_name("numpy"))
-    k_boundary = compute_k_boundary(
-        builder.gtir_pipeline.full(skip=[prune_unused_parameters])
-    )["field_b"]
+    k_boundary = compute_k_boundary(builder.gtir_pipeline.full(skip=[prune_unused_parameters]))[
+        "field_b"
+    ]
 
     assert expected_k_bounds == k_boundary
 
@@ -176,9 +174,7 @@ def test_k_bounds(definition, expected_k_bounds):
 )
 def test_min_k_size(definition, expected_min_k_size):
     builder = StencilBuilder(definition, backend=from_name("numpy"))
-    min_k_size = compute_min_k_size(
-        builder.gtir_pipeline.full(skip=[prune_unused_parameters])
-    )
+    min_k_size = compute_min_k_size(builder.gtir_pipeline.full(skip=[prune_unused_parameters]))
 
     assert expected_min_k_size == min_k_size
 
@@ -190,9 +186,7 @@ def test_k_bounds_exec(definition, expected):
         expected["min_k_size"],
     )
 
-    required_field_size = (
-        expected_min_k_size + expected_k_bounds[0] + expected_k_bounds[1]
-    )
+    required_field_size = expected_min_k_size + expected_k_bounds[0] + expected_k_bounds[1]
 
     if required_field_size > 0:
         backend = "gt:cpu_ifirst"
@@ -228,9 +222,7 @@ def test_k_bounds_exec(definition, expected):
         )
 
         # test with wrong domain, correct origin
-        with pytest.raises(
-            ValueError, match="Compute domain too small. Sequential axis"
-        ):
+        with pytest.raises(ValueError, match="Compute domain too small. Sequential axis"):
             compiled_stencil(
                 field_a,
                 field_b,
@@ -240,18 +232,14 @@ def test_k_bounds_exec(definition, expected):
 
 
 @typing.no_type_check
-def stencil_with_invalid_temporary_access_start(
-    field_a: gs.Field[float], field_b: gs.Field[float]
-):
+def stencil_with_invalid_temporary_access_start(field_a: gs.Field[float], field_b: gs.Field[float]):
     with computation(PARALLEL), interval(...):
         tmp = field_b[0, 0, 0]
         field_a = tmp[0, 0, -1]
 
 
 @typing.no_type_check
-def stencil_with_invalid_temporary_access_end(
-    field_a: gs.Field[float], field_b: gs.Field[float]
-):
+def stencil_with_invalid_temporary_access_end(field_a: gs.Field[float], field_b: gs.Field[float]):
     with computation(PARALLEL), interval(...):
         tmp = field_b[0, 0, 0]
         field_a = tmp[0, 0, 1]
@@ -266,9 +254,5 @@ def stencil_with_invalid_temporary_access_end(
 )
 def test_invalid_temporary_access(definition):
     builder = StencilBuilder(definition, backend=from_name("numpy"))
-    with pytest.raises(
-        TypeError, match="Invalid access with offset in k to temporary field tmp."
-    ):
-        k_boundary = compute_k_boundary(
-            builder.gtir_pipeline.full(skip=[prune_unused_parameters])
-        )
+    with pytest.raises(TypeError, match="Invalid access with offset in k to temporary field tmp."):
+        k_boundary = compute_k_boundary(builder.gtir_pipeline.full(skip=[prune_unused_parameters]))

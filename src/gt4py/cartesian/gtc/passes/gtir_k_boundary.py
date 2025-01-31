@@ -24,16 +24,10 @@ def _iter_field_names(
 class KBoundaryVisitor(eve.NodeVisitor):
     """For every field compute the boundary in k, e.g. (2, -1) if [k_origin-2, k_origin+k_domain-1] is accessed."""
 
-    def visit_Stencil(
-        self, node: gtir.Stencil, **kwargs: Any
-    ) -> Dict[str, Tuple[int, int]]:
-        field_boundaries = {
-            name: (-math.inf, -math.inf) for name in _iter_field_names(node)
-        }
+    def visit_Stencil(self, node: gtir.Stencil, **kwargs: Any) -> Dict[str, Tuple[int, int]]:
+        field_boundaries = {name: (-math.inf, -math.inf) for name in _iter_field_names(node)}
         for vloop in node.vertical_loops:
-            self.generic_visit(
-                vloop.body, vloop=vloop, field_boundaries=field_boundaries, **kwargs
-            )
+            self.generic_visit(vloop.body, vloop=vloop, field_boundaries=field_boundaries, **kwargs)
         # if there is no left or right boundary set to zero
         for name, b in field_boundaries.items():
             field_boundaries[name] = (
@@ -72,9 +66,7 @@ class KBoundaryVisitor(eve.NodeVisitor):
         if node.name in [decl.name for decl in vloop.temporaries] and (
             boundary[0] > 0 or boundary[1] > 0
         ):
-            raise TypeError(
-                f"Invalid access with offset in k to temporary field {node.name}."
-            )
+            raise TypeError(f"Invalid access with offset in k to temporary field {node.name}.")
         assert node.name in field_boundaries
         field_boundaries[node.name] = boundary
 
@@ -83,9 +75,7 @@ def compute_k_boundary(
     node: gtir.Stencil, include_center_interval=True
 ) -> Dict[str, Tuple[int, int]]:
     # loop from START to END is not considered as it might be empty. additional check possible in the future
-    return KBoundaryVisitor().visit(
-        node, include_center_interval=include_center_interval
-    )
+    return KBoundaryVisitor().visit(node, include_center_interval=include_center_interval)
 
 
 def compute_min_k_size(node: gtir.Stencil) -> int:
@@ -99,9 +89,7 @@ def compute_min_k_size(node: gtir.Stencil) -> int:
             vloop.interval.start.level == LevelMarker.START
             and vloop.interval.end.level == LevelMarker.END
         ):
-            if not (
-                vloop.interval.start.offset == 0 and vloop.interval.end.offset == 0
-            ):
+            if not (vloop.interval.start.offset == 0 and vloop.interval.end.offset == 0):
                 biggest_offset = max(
                     biggest_offset,
                     vloop.interval.start.offset - vloop.interval.end.offset + 1,
