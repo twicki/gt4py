@@ -311,6 +311,9 @@ class DaCeIRBuilder(eve.NodeTranslator):
     ) -> dcir.VariableKOffset:
         return dcir.VariableKOffset(k=self.visit(node.k, **kwargs))
 
+    def visit_AbsoluteKIndex(self, node: oir.AbsoluteKIndex, **kwargs):
+        return dcir.AbsoluteKIndex(k=self.visit(node.k, **kwargs))
+
     def visit_LocalScalar(self, node: oir.LocalScalar, **kwargs: Any) -> dcir.LocalScalarDecl:
         return dcir.LocalScalarDecl(name=node.name, dtype=node.dtype)
 
@@ -322,6 +325,7 @@ class DaCeIRBuilder(eve.NodeTranslator):
         targets: Set[eve.SymbolRef],
         var_offset_fields: Set[eve.SymbolRef],
         K_write_with_offset: Set[eve.SymbolRef],
+        absolute_K_access_fields: Set[eve.SymbolRef],
         **kwargs: Any,
     ) -> Union[dcir.IndexAccess, dcir.ScalarAccess]:
         """Generate the relevant accessor to match the memlet that was previously setup.
@@ -354,9 +358,34 @@ class DaCeIRBuilder(eve.NodeTranslator):
                 node.name in targets and node.offset == common.CartesianOffset.zero()
             )
             name = get_tasklet_symbol(node.name, node.offset, is_target=is_target)
-            if node.data_index:
+            if node.name in absolute_K_access_fields:
+                # Two cases:
+                #   - we are accessing in absolute K - and need to resolve that index (offset.k)
+                #   - we are NOT accessing in absolute K for this access, but the field will be
+                #     before or after, and we need to revolve it as an IndexAccess rather than
+                #     a scalar access
+                offset = self.visit(
+                    node.offset,
+                    is_target=is_target,
+                    targets=targets,
+                    var_offset_fields=var_offset_fields,
+                    K_write_with_offset=K_write_with_offset,
+                    absolute_K_access_fields=absolute_K_access_fields,
+                    **kwargs,
+                )
                 res = dcir.IndexAccess(
-                    name=name, offset=None, data_index=node.data_index, dtype=node.dtype
+                    name=name,
+                    offset=offset,
+                    data_index=node.data_index,
+                    dtype=node.dtype,
+                )
+            elif node.data_index:
+                # No offset - but a data dimension
+                res = dcir.IndexAccess(
+                    name=name,
+                    offset=None,
+                    data_index=node.data_index,
+                    dtype=node.dtype,
                 )
             else:
                 res = dcir.ScalarAccess(name=name, dtype=node.dtype)
@@ -492,8 +521,33 @@ class DaCeIRBuilder(eve.NodeTranslator):
                 reshape_memlet = False
                 for access_node in dcir_node.walk_values().if_isinstance(dcir.IndexAccess):
                     if access_node.data_index and access_node.name == memlet.connector:
-                        access_node.data_index = memlet_data_index + access_node.data_index
-                        assert len(access_node.data_index) == array_ndims
+                        # Order matters!
+                        # Resolve first the cartesian dimensions packed in memlet_data_index
+                        access_node.explicit_indices = []
+                        for data_index in memlet_data_index:
+                            access_node.explicit_indices.append(
+                                self.visit(
+                                    data_index,
+                                    symbol_collector=symbol_collector,
+                                    global_ctx=global_ctx,
+                                    **kwargs,
+                                )
+                            )
+                        # Seperate between case where K is offset or absolute and
+                        # where it's a regular offset (should be dealt with the above memlet_data_index)
+                        if access_node.offset:
+                            access_node.explicit_indices.append(access_node.offset)
+                        # Add any remaining data dimensions indexing
+                        for data_index in access_node.data_index:
+                            access_node.explicit_indices.append(
+                                self.visit(
+                                    data_index,
+                                    symbol_collector=symbol_collector,
+                                    global_ctx=global_ctx,
+                                    **kwargs,
+                                )
+                            )
+                        assert len(access_node.explicit_indices) == array_ndims
                         reshape_memlet = True
                 if reshape_memlet:
                     # ensure that memlet symbols used for array indexing are defined in context
@@ -823,6 +877,14 @@ class DaCeIRBuilder(eve.NodeTranslator):
                 ):
                     K_write_with_offset.add(assign_node.left.name)
 
+        # Book keep - field that will have absolute access in K, which therefore
+        # need an IndexAccess down the line rather than scalar
+        absolute_K_access_fields: Set[eve.SymbolRef] = {
+            acc.name
+            for acc in node.walk_values().if_isinstance(oir.FieldAccess)
+            if isinstance(acc.offset, common.AbsoluteKIndex)
+        }
+
         sections_idx = next(
             idx
             for idx, item in enumerate(global_ctx.library_node.expansion_specification)
@@ -840,6 +902,7 @@ class DaCeIRBuilder(eve.NodeTranslator):
                 symbol_collector=symbol_collector,
                 var_offset_fields=var_offset_fields,
                 K_write_with_offset=K_write_with_offset,
+                absolute_K_access_fields=absolute_K_access_fields,
                 **kwargs,
             )
         )
@@ -872,3 +935,13 @@ class DaCeIRBuilder(eve.NodeTranslator):
             write_memlets=[memlet for memlet in field_memlets if memlet.field in write_fields],
             symbol_decls=list(symbol_collector.symbol_decls.values()),
         )
+
+    def visit_IteratorAccess(
+        self,
+        iterator_access: oir.IteratorAccess,
+        *,
+        symbol_collector: DaCeIRBuilder.SymbolCollector,
+        **kwargs,
+    ) -> dcir.ScalarAccess:
+        symbol_name = f"__{iterator_access.name.lower()}"
+        return dcir.ScalarAccess(name=symbol_name, dtype=iterator_access.dtype)

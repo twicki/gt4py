@@ -27,7 +27,7 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
 
     def _visit_offset(
         self,
-        node: Union[dcir.VariableKOffset, common.CartesianOffset],
+        node: Union[common.VariableKOffset, common.CartesianOffset],
         *,
         access_info: dcir.FieldAccessInfo,
         decl: dcir.FieldDecl,
@@ -60,11 +60,24 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
         res = dace.subsets.Range([r for i, r in enumerate(ranges.ranges) if int_sizes[i] != 1])
         return str(res)
 
-    def visit_CartesianOffset(self, node: common.CartesianOffset, **kwargs: Any) -> str:
-        return self._visit_offset(node, **kwargs)
+    def visit_CartesianOffset(self, node: common.CartesianOffset, explicit=False, **kwargs):
+        # If called from the explicit pass we need to be add manually the relative indexing
+        if explicit:
+            return f"__k+{self.visit(node.k, **kwargs)}"
+        else:
+            return self._visit_offset(node, **kwargs)
 
-    def visit_VariableKOffset(self, node: dcir.VariableKOffset, **kwargs: Any) -> str:
-        return self._visit_offset(node, **kwargs)
+    def visit_VariableKOffset(self, node: common.VariableKOffset, explicit=False, **kwargs):
+        # If called from the explicit pass we need to be add manually the relative indexing
+        if explicit:
+            return f"__k+{self.visit(node.k, **kwargs)}"
+        else:
+            return self._visit_offset(node, **kwargs)
+
+    def visit_AbsoluteKIndex(self, node: common.AbsoluteKIndex, **kwargs):
+        # Unlike other offsets - absolute is _always_ explicit we just have to resolve
+        # the index
+        return str(self.visit(node.k, **kwargs))
 
     def visit_IndexAccess(
         self,
@@ -89,20 +102,40 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
             ) from None
 
         index_strs = []
-        if node.offset is not None:
-            index_strs.append(
-                self.visit(
-                    node.offset,
-                    decl=symtable[memlet.field],
-                    access_info=memlet.access_info,
-                    symtable=symtable,
-                    in_idx=True,
-                    **kwargs,
+        if node.explicit_indices:
+            # Full array access with every dimensions accessed in full
+            # everything was packed in `explicit_indices` in `DaCeIRBuilder.visit_HorizontalExecution`
+            # along the `reshape_memlet=True` code path
+            assert len(node.explicit_indices) == len(sdfg_ctx.sdfg.arrays[memlet.field].shape)
+            for idx in node.explicit_indices:
+                index_strs.append(
+                    self.visit(
+                        idx,
+                        symtable=symtable,
+                        in_idx=True,
+                        explicit=True,
+                        **kwargs,
+                    )
                 )
+        else:
+            # Grid-point access, I & J are unitary, K can be offseted with variable
+            # Resolve K offset (also resolves I & J)
+            if node.offset is not None:
+                index_strs.append(
+                    self.visit(
+                        node.offset,
+                        decl=symtable[memlet.field],
+                        access_info=memlet.access_info,
+                        symtable=symtable,
+                        in_idx=True,
+                        **kwargs,
+                    )
+                )
+            # Add any data dimensions
+            index_strs.extend(
+                self.visit(idx, symtable=symtable, in_idx=True, **kwargs)
+                for idx in node.data_index
             )
-        index_strs.extend(
-            self.visit(idx, symtable=symtable, in_idx=True, **kwargs) for idx in node.data_index
-        )
         return f"{node.name}[{','.join(index_strs)}]"
 
     def visit_AssignStmt(self, node: dcir.AssignStmt, **kwargs: Any) -> str:
@@ -168,7 +201,10 @@ class TaskletCodegen(eve.codegen.TemplatedGenerator, eve.VisitorWithSymbolTableT
                 common.NativeFunction.CEIL: "ceil",
                 common.NativeFunction.TRUNC: "trunc",
                 common.NativeFunction.ROUND: "round",
-                common.NativeFunction.INT: "int",
+                common.NativeFunction.ERF: "erf",
+                common.NativeFunction.ERFC: "erfc",
+                common.NativeFunction.I32: "dace.int32",
+                common.NativeFunction.I64: "dace.int64",
                 common.NativeFunction.F32: "dace.float32",
                 common.NativeFunction.F64: "dace.float64",
             }[func]
