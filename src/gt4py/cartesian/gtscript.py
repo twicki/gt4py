@@ -71,13 +71,9 @@ TYPE_HINT_AND_CAST_BUILTINS = {
     "f64",
 }
 
-builtins_and_inline_ignore = {
-    "compile_assert",
-}
+REDUCTION_BUILTINS = {"reduce", "add"}
 
-builtins_and_inline_ignore = {
-    "compile_assert",
-}
+builtins_and_inline_ignore = {"compile_assert", "range"}
 
 builtins = {
     "I",
@@ -101,17 +97,17 @@ builtins = {
     "__gtscript__",
     "__externals__",
     "__INLINED",
-    "range",
     *MATH_BUILTINS,
     *TYPE_HINT_AND_CAST_BUILTINS,
+    *REDUCTION_BUILTINS,
     *builtins_and_inline_ignore,
 }
 
 IGNORE_WHEN_INLINING = {
     *MATH_BUILTINS,
     *TYPE_HINT_AND_CAST_BUILTINS,
+    *REDUCTION_BUILTINS,
     *builtins_and_inline_ignore,
-    "range",
 }
 
 __all__ = [*list(builtins), "function", "stencil", "lazy_stencil"]
@@ -978,4 +974,16 @@ def erf(x) -> _gt_all_op_types:  # type: ignore[empty-body]
 
 def erfc(x) -> _gt_all_op_types:  # type: ignore[empty-body]
     """Return the complementary error function, which is 1.0 - erf"""
+    pass
+
+
+# GTScript builtins: reductions
+def reduce(op, generator, initial=None) -> _gt_all_op_types:  # type: ignore[empty-body]
+    """Apply the binary operator `op` cumulatively to all elements of `generator` with
+    initial value `initial` (optional)."""
+    pass
+
+
+def add(x, y) -> None:
+    """Placeholder for sum reduction operator."""
     pass
