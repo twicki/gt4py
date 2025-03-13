@@ -730,6 +730,7 @@ class IRMaker(ast.NodeVisitor):
         backend_name: str,
         *,
         domain: nodes.Domain,
+        options: gt_definitions.BuildOptions,
         temp_decls: Optional[Dict[str, nodes.FieldDecl]] = None,
         dtypes: Optional[Dict[Type, Type]] = None,
     ):
@@ -789,6 +790,9 @@ class IRMaker(ast.NodeVisitor):
             "i64": nodes.NativeFunction.I64,
             "f32": nodes.NativeFunction.F32,
             "f64": nodes.NativeFunction.F64,
+            "integer": nodes.NativeFunction.I32
+            if options.floating_point_precision == 32
+            else nodes.NativeFunction.I64,
         }
 
     def __call__(self, ast_root: ast.AST):
@@ -2191,6 +2195,7 @@ class GTScriptParser(ast.NodeVisitor):
             domain=domain,
             temp_decls=temp_decls,
             dtypes=self.dtypes,
+            options=self.options,
         )(self.ast_root)
 
         self.definition_ir = nodes.StencilDefinition(
