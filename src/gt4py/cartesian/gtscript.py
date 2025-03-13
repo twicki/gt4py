@@ -69,6 +69,7 @@ TYPE_HINT_AND_CAST_BUILTINS = {
     "i64",
     "f32",
     "f64",
+    "integer",
 }
 
 builtins_and_inline_ignore = {
@@ -180,6 +181,7 @@ def stencil(
     rebuild=False,
     cache_settings=None,
     raise_if_not_cached=False,
+    floating_point_precision=64,
     **kwargs,
 ):
     """Generate an implementation of the stencil definition with the specified backend.
@@ -233,6 +235,9 @@ def stencil(
             - `root_path`: (str)
             - `dir_name`: (str)
 
+        floating_point_precision: `int` optional
+            Value to define the type precision of generic casts `integer` and `floating`.
+
         **kwargs: `dict`, optional
             Extra backend-specific options. Check the specific backend
             documentation for further information.
@@ -272,6 +277,8 @@ def stencil(
         raise ValueError(f"Invalid 'raise_if_not_cached' bool value ('{raise_if_not_cached}')")
     if cache_settings is not None and not isinstance(cache_settings, dict):
         raise ValueError(f"Invalid 'cache_settings' dictionary ('{cache_settings}')")
+    if not isinstance(floating_point_precision, int) and floating_point_precision not in (32, 64):
+        raise ValueError(f"Invalid 'floating_point_precision' ('{floating_point_precision}')")
 
     module = None
     if name:
@@ -312,6 +319,7 @@ def stencil(
         backend_opts=kwargs,
         build_info=build_info,
         cache_settings=cache_settings or {},
+        floating_point_precision=floating_point_precision,
         impl_opts=_impl_opts,
     )
 
@@ -818,6 +826,8 @@ i32 = np.int32
 i64 = np.int64
 f64 = np.float64
 f32 = np.float32
+integer: Type[np.integer] = None
+"Type for generic integer"
 _gt_all_op_types = Union[i32, i64, f32, f64]
 
 
