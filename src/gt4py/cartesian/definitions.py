@@ -101,6 +101,7 @@ class BuildOptions(AttributeClassLike):
     rebuild = attribute(of=bool, default=False)
     raise_if_not_cached = attribute(of=bool, default=False)
     cache_settings = attribute(of=DictOf[str, Any], factory=dict)
+    literal_precision = attribute(of=int, default=64)
     _impl_opts = attribute(of=DictOf[str, Any], factory=dict)
 
     @property
