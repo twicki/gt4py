@@ -285,6 +285,15 @@ class DataType(enum.Enum):
 
 
 def frontend_type_to_native_type(literal_precision: int = 64) -> dict[str, DataType]:
+    """Return the mapping of frontend types to native types.
+
+    Args:
+        literal_precision (int, optional): Literal precision used for mapping.
+            Defaults to 64.
+
+    Returns:
+        dict[str, DataType]: Mapping of the frontend types to our DataTypes.
+    """
     return {
         "i32": DataType.INT32,
         "i64": DataType.INT64,

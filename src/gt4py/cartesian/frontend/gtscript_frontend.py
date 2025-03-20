@@ -16,6 +16,7 @@ import textwrap
 import time
 import types
 import warnings
+from collections.abc import Callable
 from typing import Any, Dict, Final, List, Literal, Optional, Sequence, Set, Tuple, Type, Union
 
 import numpy as np
@@ -968,6 +969,7 @@ class IRMaker(ast.NodeVisitor):
                 else nodes.NativeFunction.F64
             ),
         }
+        "Conversion table for functions to NativeFunctions."
 
         self.temporary_type_to_native_type = {
             "i32": nodes.DataType.INT32,
@@ -981,6 +983,7 @@ class IRMaker(ast.NodeVisitor):
             if options.literal_precision == 32
             else nodes.DataType.FLOAT64,
         }
+        "Conversion table for types to DataTypes."
 
     def __call__(self, ast_root: ast.AST):
         assert (
@@ -1977,8 +1980,25 @@ class GTScriptParser(ast.NodeVisitor):
 
     @staticmethod
     def annotate_definition(
-        definition, options: gt_definitions.BuildOptions = None, externals=None
-    ):
+        definition: Callable, options: gt_definitions.BuildOptions = None, externals=None
+    ) -> Callable:
+        """Annotate the function definition with dtypes, resolve externals and add default values.
+
+        Args:
+            definition (Callable): function to annotate
+            options (gt_definitions.BuildOptions, optional): Options for building the stencil.
+                Defaults to None.
+            externals (_type_, optional): Externals used.
+                Defaults to None.
+
+        Raises:
+            GTScriptDefinitionError
+            GTScriptValueError
+            GTScriptSyntaxError
+
+        Returns:
+            definition (Callable): function to annotate
+        """
         api_signature = []
         api_annotations = []
 
@@ -2443,8 +2463,19 @@ class GTScriptFrontend(Frontend):
 
     @classmethod
     def prepare_stencil_definition(
-        cls, definition, externals, options: gt_definitions.BuildOptions = None
-    ):
+        cls, definition: Callable, externals, options: gt_definitions.BuildOptions = None
+    ) -> Callable:
+        """Return an annotated version of the stencil definition.
+
+        Args:
+            definition (Callable): Stencil to annotate.
+            externals: externals to use
+            options (gt_definitions.BuildOptions, optional): Options for buidling the stencil.
+                Defaults to None.
+
+        Returns:
+            Callable: Annotated stencil
+        """
         return GTScriptParser.annotate_definition(definition, options, externals)
 
     @classmethod
