@@ -2463,7 +2463,7 @@ class GTScriptFrontend(Frontend):
 
     @classmethod
     def prepare_stencil_definition(
-        cls, definition: Callable, externals, options: gt_definitions.BuildOptions = None
+        cls, definition: Callable, externals, options: gt_definitions.BuildOptions | None = None
     ) -> Callable:
         """Return an annotated version of the stencil definition.
 
