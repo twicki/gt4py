@@ -1980,7 +1980,7 @@ class GTScriptParser(ast.NodeVisitor):
 
     @staticmethod
     def annotate_definition(
-        definition: Callable, options: gt_definitions.BuildOptions = None, externals=None
+        definition: Callable, options: gt_definitions.BuildOptions | None = None, externals=None
     ) -> Callable:
         """Annotate the function definition with dtypes, resolve externals and add default values.
 
