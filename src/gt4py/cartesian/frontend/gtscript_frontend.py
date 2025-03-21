@@ -2066,7 +2066,7 @@ class GTScriptParser(ast.NodeVisitor):
         temp_annotations: Dict[str, gtscript._FieldDescriptor] = {}
         temp_init_values: Dict[str, numbers.Number] = {}
 
-        if options:
+        if options is not None:
             frontent_types_to_native_types = nodes.frontend_type_to_native_type(
                 options.literal_precision
             )
