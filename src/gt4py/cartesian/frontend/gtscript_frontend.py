@@ -2071,7 +2071,7 @@ class GTScriptParser(ast.NodeVisitor):
                 options.literal_precision
             )
         else:
-            frontent_types_to_native_types = nodes.frontend_type_to_native_type()
+            frontend_types_to_native_types = nodes.frontend_type_to_native_type()
 
         ann_assign_context = {
             "Field": gtscript.Field,
