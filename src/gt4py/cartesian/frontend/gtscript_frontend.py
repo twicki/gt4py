@@ -2084,7 +2084,7 @@ class GTScriptParser(ast.NodeVisitor):
             "JK": gtscript.JK,
             "np": np,
             **(resolved_externals if externals is not None else nonlocal_symbols),
-            **frontent_types_to_native_types,
+            **frontend_types_to_native_types,
         }
         ann_assigns = tuple(filter(lambda stmt: isinstance(stmt, ast.AnnAssign), ast_func_def.body))
         for ann_assign in ann_assigns:
