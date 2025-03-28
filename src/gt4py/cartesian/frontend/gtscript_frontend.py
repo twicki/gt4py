@@ -2094,7 +2094,7 @@ class GTScriptParser(ast.NodeVisitor):
             source = gt_meta.ast_unparse(ann_assign.annotation)
             descriptor = eval(source, ann_assign_context)
             # Scalar annotated are dealt with after inlining
-            if descriptor in frontent_types_to_native_types.values():
+            if descriptor in frontend_types_to_native_types.values():
                 continue
             temp_annotations[name] = descriptor
             if descriptor.axes != gtscript.IJK:
