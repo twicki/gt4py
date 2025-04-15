@@ -13,6 +13,7 @@ from typing import Any, Optional, Sequence, Union
 import dace
 from dace.transformation import dataflow as dace_dataflow
 from dace.transformation.auto import auto_optimize as dace_aoptimize
+from dace.transformation.passes import analysis as dace_analysis
 
 from gt4py.next import common as gtx_common
 from gt4py.next.program_processors.runners.dace import transformations as gtx_transformations
@@ -21,12 +22,13 @@ from gt4py.next.program_processors.runners.dace import transformations as gtx_tr
 def gt_auto_optimize(
     sdfg: dace.SDFG,
     gpu: bool,
-    leading_dim: Optional[
-        Union[str, gtx_common.Dimension, list[Union[str, gtx_common.Dimension]]]
+    unit_strides_dim: Optional[
+        Union[str, gtx_common.Dimension, list[Union[str, gtx_common.Dimension]], bool]
     ] = None,
+    unit_strides_kind: Optional[Union[gtx_common.DimensionKind, bool]] = None,
     aggressive_fusion: bool = True,
     max_optimization_rounds_p2: int = 100,
-    make_persistent: bool = True,
+    make_persistent: bool = False,
     gpu_block_size: Optional[Sequence[int | str] | str] = None,
     blocking_dim: Optional[gtx_common.Dimension] = None,
     blocking_size: int = 10,
@@ -60,15 +62,19 @@ def gt_auto_optimize(
         `gt_auto_fuse_top_level_maps()` for more details.
     3. After the function created big kernels/maps it will apply some optimization,
         inside the kernels itself. For example fuse maps inside them.
-    4. Afterwards it will process the map ranges and iteration order. For this
-        the function assumes that the dimension indicated by `leading_dim` is the
-        one with stride one.
+    4. Afterwards it will process the map ranges and iteration order. Such that the
+        array dimensions with unit strides are on the inner most loop. For this
+        `unit_strides_dim` or `unit_strides_kind` are used, see
+        `gt_set_iteration_order()` for more.
+        If they are not specified they are inferred from `gpu`, to disable this
+        set either `unit_strides_dim` or `unit_strides_kind` to `False`.
     5. If requested the function will now apply loop blocking, on the dimension
-        indicated by `leading_dim`.
-    6. If requested the SDFG will be transformed to GPU. For this the
+        indicated by `blocking_dim`, the step size if given by `blocking_size`.
+    6. The strides of temporaries are set to match the compute order.
+    7. If requested the SDFG will be transformed to GPU. For this the
         `gt_gpu_transformation()` function is used, that might apply several other
         optimizations.
-    7. Afterwards some general transformations to the SDFG are applied.
+    8. Afterwards some general transformations to the SDFG are applied.
         This includes:
         - Use fast implementation for library nodes.
         - Move small transients to stack.
@@ -78,7 +84,9 @@ def gt_auto_optimize(
     Args:
         sdfg: The SDFG that should be optimized in place.
         gpu: Optimize for GPU or CPU.
-        leading_dim: Leading dimension, indicates where the stride is 1.
+        unit_strides_dim: List of dimensions that is considered to have unit strides.
+        unit_strides_kind: All dimensions of this kind are considered to have unit
+            strides.
         aggressive_fusion: Be more aggressive during phase 2, will lead to the promotion
             of certain maps (over computation) but will lead to larger kernels.
         max_optimization_rounds_p2: Maximum number of optimization rounds in phase 2.
@@ -209,11 +217,24 @@ def gt_auto_optimize(
 
         # Phase 4: Iteration Space
         #   This essentially ensures that the stride 1 dimensions are handled
-        #   by the inner most loop nest (CPU) or x-block (GPU)
-        if leading_dim is not None:
+        #   by the inner most loop nest (CPU) or x-block (GPU).
+        #   If not given we assume that on GPU we have horizontal and on CPU
+        #   vertical.
+        if any(
+            unit_strides_arg is False for unit_strides_arg in [unit_strides_dim, unit_strides_kind]
+        ):
+            unit_strides_dim = None
+            unit_strides_kind = None
+        elif unit_strides_dim is None and unit_strides_kind is None:
+            unit_strides_kind = (
+                gtx_common.DimensionKind.HORIZONTAL if gpu else gtx_common.DimensionKind.VERTICAL
+            )
+
+        if unit_strides_dim is not None or unit_strides_kind is not None:
             gtx_transformations.gt_set_iteration_order(
                 sdfg=sdfg,
-                leading_dim=leading_dim,
+                unit_strides_dim=unit_strides_dim,  # type: ignore[arg-type]
+                unit_strides_kind=unit_strides_kind,  # type: ignore[arg-type]
                 validate=validate,
                 validate_all=validate_all,
             )
@@ -234,7 +255,14 @@ def gt_auto_optimize(
                 validate_all=validate_all,
             )
 
-        # Phase 6: Going to GPU
+        # Phase 6: Setting the strides of transients
+        #   It is important that we set the strides before the GPU transformation.
+        #   Because this transformation will also apply `CopyToMap` for the Memlets
+        #   that the DaCe runtime can not handle.
+        # TODO(phimuell): Should also get the unit stride information.
+        gtx_transformations.gt_change_transient_strides(sdfg, gpu=gpu)
+
+        # Phase 7: Going to GPU
         if gpu:
             # TODO(phimuell): The GPU function might modify the map iteration order.
             #                   This is because how it is implemented (promotion and
@@ -250,7 +278,7 @@ def gt_auto_optimize(
                 try_removing_trivial_maps=True,
             )
 
-        # Phase 7: General Optimizations
+        # Phase 8: General Optimizations
         #   The following operations apply regardless if we have a GPU or CPU.
         #   The DaCe auto optimizer also uses them. Note that the reuse transient
         #   is not done by DaCe.
@@ -266,9 +294,6 @@ def gt_auto_optimize(
         # TODO(phimuell): Fix the bug, it uses the tile value and not the stack array value.
         dace_aoptimize.move_small_arrays_to_stack(sdfg)
 
-        # Now we modify the strides.
-        gtx_transformations.gt_change_transient_strides(sdfg, gpu=gpu)
-
         if make_persistent:
             gtx_transformations.gt_make_transients_persistent(sdfg=sdfg, device=device)
 
@@ -280,6 +305,7 @@ def gt_auto_optimize(
                 #   For compatibility with DaCe (and until we found out why) the GT4Py
                 #   auto optimizer will emulate this behaviour.
                 for state in sdfg.states():
+                    assert isinstance(state, dace.SDFGState)
                     for edge in state.edges():
                         edge.data.wcr_nonatomic = False
 
@@ -321,28 +347,37 @@ def gt_auto_fuse_top_level_maps(
         call `gt_auto_optimize()` directly.
     """
     # Compute the SDFG hash to see if something has changed.
+    #  We use the hash instead of the return values of the transformation, because
+    #  computing the hash invalidates some caches that are not properly updated
+    # TODO(phimuell): Remove this hack as soon as DaCe is fixed.
     sdfg_hash = sdfg.hash_sdfg()
 
     # We use a loop to optimize because we are using multiple transformations
     #  after the other, thus new opportunities might arise in the next round.
     #  We use the hash of the SDFG to detect if we have reached a fix point.
     for _ in range(max_optimization_rounds):
-        # Use map fusion to reduce their number and to create big kernels
         # TODO(phimuell): Use a cost measurement to decide if fusion should be done.
-        # TODO(phimuell): Add parallel fusion transformation. Should it run after
-        #                   or with the serial one?
+        # TODO(phimuell): When should the parallel fusing happen before, after or
+        #                   together with the serial one?
+        # TODO(phimuell): Switch to `FullMapFusion` once DaCe has parallel map fusion
+        #   and [issue#1911](https://github.com/spcl/dace/issues/1911) has been solved.
+
+        # First we do scan the entire SDFG to figure out which data is only
+        #  used once and can be deleted. MapFusion could do this on its own but
+        #  it is more efficient to do it once and then reuse it.
+        find_single_use_data = dace_analysis.FindSingleUseData()
+        single_use_data = find_single_use_data.apply_pass(sdfg, None)
+
+        fusion_transformation = gtx_transformations.MapFusion(
+            only_toplevel_maps=True,
+            allow_parallel_map_fusion=True,
+            allow_serial_map_fusion=True,
+            only_if_common_ancestor=False,
+        )
+        fusion_transformation._single_use_data = single_use_data
+
         sdfg.apply_transformations_repeated(
-            [
-                gtx_transformations.MapFusionSerial(
-                    only_toplevel_maps=True,
-                ),
-                gtx_transformations.MapFusionParallel(
-                    only_toplevel_maps=True,
-                    # This will lead to the creation of big probably unrelated maps.
-                    #  However, it might be good.
-                    only_if_common_ancestor=False,
-                ),
-            ],
+            fusion_transformation,
             validate=validate,
             validate_all=validate_all,
         )
@@ -350,7 +385,14 @@ def gt_auto_fuse_top_level_maps(
         # Now do some cleanup task, that may enable further fusion opportunities.
         #  Note for performance reasons simplify is deferred.
         phase2_cleanup = []
-        phase2_cleanup.append(dace_dataflow.TrivialTaskletElimination())
+        phase2_cleanup.extend(
+            [
+                dace_dataflow.TrivialTaskletElimination(),
+                gtx_transformations.SplitAccessNode(
+                    single_use_data=single_use_data,
+                ),
+            ]
+        )
 
         # If requested perform map promotion, this will lead to more fusion.
         if aggressive_fusion:

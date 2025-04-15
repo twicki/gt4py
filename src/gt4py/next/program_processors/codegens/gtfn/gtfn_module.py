@@ -156,7 +156,7 @@ class GTFNTranslationStep(
     def _preprocess_program(
         self,
         program: itir.Program,
-        offset_provider: common.OffsetProvider,
+        offset_provider: common.OffsetProvider | common.OffsetProviderType,
     ) -> itir.Program:
         apply_common_transforms = functools.partial(
             pass_manager.apply_common_transforms,
@@ -184,7 +184,7 @@ class GTFNTranslationStep(
     def generate_stencil_source(
         self,
         program: itir.Program,
-        offset_provider: common.OffsetProvider,
+        offset_provider: common.OffsetProvider | common.OffsetProviderType,
         column_axis: Optional[common.Dimension],
     ) -> str:
         if self.enable_itir_transforms:
@@ -310,8 +310,7 @@ class GTFNTranslationStep(
 
     def _not_implemented_for_device_type(self) -> NotImplementedError:
         return NotImplementedError(
-            f"{self.__class__.__name__} is not implemented for "
-            f"device type {self.device_type.name}"
+            f"{self.__class__.__name__} is not implemented for device type {self.device_type.name}"
         )
 
 

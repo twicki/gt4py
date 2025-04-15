@@ -8,12 +8,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Optional, Tuple, Type
 
 from gt4py import storage as gt_storage
 from gt4py.cartesian.backend.base import CLIBackendMixin, disabled, register
 from gt4py.cartesian.backend.gtc_common import (
     BackendCodegen,
+    BaseGTBackend,
+    CUDAPyExtModuleGenerator,
+    GTBackendOptions,
     bindings_main_template,
     pybuffer_to_sid,
 )
@@ -27,8 +30,6 @@ from gt4py.cartesian.gtc.passes.oir_optimizations.caches import FillFlushToLocal
 from gt4py.cartesian.gtc.passes.oir_optimizations.pruning import NoFieldAccessPruning
 from gt4py.cartesian.gtc.passes.oir_pipeline import DefaultPipeline
 from gt4py.eve import codegen
-
-from .gtc_common import BaseGTBackend, CUDAPyExtModuleGenerator
 
 
 if TYPE_CHECKING:
@@ -130,18 +131,18 @@ class CudaBackend(BaseGTBackend, CLIBackendMixin):
     """CUDA backend using gtc."""
 
     name = "cuda"
-    options = {
+    options: ClassVar[GTBackendOptions] = {
         **BaseGTBackend.GT_BACKEND_OPTS,
         "device_sync": {"versioning": True, "type": bool},
     }
-    languages = {"computation": "cuda", "bindings": ["python"]}
+    languages: ClassVar[dict] = {"computation": "cuda", "bindings": ["python"]}
     storage_info = gt_storage.layout.CUDALayout
     PYEXT_GENERATOR_CLASS = CudaExtGenerator
     MODULE_GENERATOR_CLASS = CUDAPyExtModuleGenerator
     GT_BACKEND_T = "gpu"
 
     def generate_extension(self, **kwargs: Any) -> Tuple[str, str]:
-        return self.make_extension(stencil_ir=self.builder.gtir, uses_cuda=True)
+        return self.make_extension(uses_cuda=True)
 
     def generate(self) -> Type[StencilObject]:
         self.check_options(self.builder.options)

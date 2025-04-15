@@ -66,27 +66,24 @@ MATH_BUILTINS_MAPPING = {
     "less_equal": "({} <= {})",
     "greater": "({} > {})",
     "greater_equal": "({} >= {})",
-    "and_": "({} & {})",
-    "or_": "({} | {})",
-    "xor_": "({} ^ {})",
+    "and_": "({} and {})",
+    "or_": "({} or {})",
+    "xor_": "({} != {})",
     "mod": "({} % {})",
-    "not_": "(not {})",  # ~ is not bitwise in numpy
+    "not_": "(not {})",
 }
 
 
-def builtin_cast(*args: Any) -> str:
-    val, target_type = args
+def builtin_cast(val: str, target_type: str) -> str:
     assert target_type in builtins.TYPE_BUILTINS
     return MATH_BUILTINS_MAPPING[target_type].format(val)
 
 
-def builtin_if(*args: Any) -> str:
-    cond, true_val, false_val = args
+def builtin_if(cond: str, true_val: str, false_val: str) -> str:
     return f"{true_val} if {cond} else {false_val}"
 
 
-def builtin_tuple_get(*args: Any) -> str:
-    index, tuple_name = args
+def builtin_tuple_get(index: str, tuple_name: str) -> str:
     return f"{tuple_name}_{index}"
 
 
@@ -99,7 +96,7 @@ def make_const_list(arg: str) -> str:
     return arg
 
 
-GENERAL_BUILTIN_MAPPING: dict[str, Callable[[Any], str]] = {
+GENERAL_BUILTIN_MAPPING: dict[str, Callable[..., str]] = {
     "cast_": builtin_cast,
     "if_": builtin_if,
     "make_const_list": make_const_list,

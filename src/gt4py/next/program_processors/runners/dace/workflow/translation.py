@@ -15,7 +15,7 @@ import dace
 import factory
 
 from gt4py._core import definitions as core_defs
-from gt4py.next import allocators as gtx_allocators, common
+from gt4py.next import common
 from gt4py.next.iterator import ir as itir, transforms as itir_transforms
 from gt4py.next.otf import languages, stages, step_types, workflow
 from gt4py.next.otf.binding import interface
@@ -35,7 +35,8 @@ class DaCeTranslator(
 ):
     device_type: core_defs.DeviceType
     auto_optimize: bool
-    itir_transforms_off: bool = False
+    disable_itir_transforms: bool = False
+    disable_field_origin_on_program_arguments: bool = False
 
     def _language_settings(self) -> languages.LanguageSettings:
         return languages.LanguageSettings(
@@ -50,14 +51,21 @@ class DaCeTranslator(
         auto_opt: bool,
         on_gpu: bool,
     ) -> dace.SDFG:
-        if not self.itir_transforms_off:
+        if not self.disable_itir_transforms:
             ir = itir_transforms.apply_fieldview_transforms(ir, offset_provider=offset_provider)
         sdfg = gtir_sdfg.build_sdfg_from_gtir(
-            ir, common.offset_provider_to_type(offset_provider), column_axis
+            ir,
+            common.offset_provider_to_type(offset_provider),
+            column_axis,
+            disable_field_origin_on_program_arguments=self.disable_field_origin_on_program_arguments,
         )
 
         if auto_opt:
-            gtx_transformations.gt_auto_optimize(sdfg, gpu=on_gpu)
+            gtx_transformations.gt_auto_optimize(
+                sdfg,
+                gpu=on_gpu,
+                make_persistent=False,
+            )
         elif on_gpu:
             # We run simplify to bring the SDFG into a canonical form that the gpu transformations
             # can handle. This is a workaround for an issue with scalar expressions that are
@@ -80,7 +88,7 @@ class DaCeTranslator(
             inp.args.offset_provider,  # TODO(havogt): should be offset_provider_type once the transformation don't require run-time info
             inp.args.column_axis,
             auto_opt=self.auto_optimize,
-            on_gpu=(self.device_type == gtx_allocators.CUPY_DEVICE),
+            on_gpu=(self.device_type == core_defs.CUPY_DEVICE_TYPE),
         )
 
         param_types = tuple(

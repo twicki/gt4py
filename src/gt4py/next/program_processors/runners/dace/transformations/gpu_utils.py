@@ -92,15 +92,10 @@ def gt_gpu_transformation(
     gtx_transformations.gt_simplify(sdfg)
 
     if try_removing_trivial_maps:
-        # In DaCe a Tasklet, outside of a Map, can not write into an _array_ that is on
-        #  GPU. `sdfg.apply_gpu_transformations()` will wrap such Tasklets in a Map. So
-        #  we might end up with lots of these trivial Maps, each requiring a separate
-        #  kernel launch. To prevent this we will combine these trivial maps, if
-        #  possible, with their downstream maps.
-        sdfg.apply_transformations_once_everywhere(
-            TrivialGPUMapElimination(),
-            validate=False,
-            validate_all=False,
+        gt_remove_trivial_gpu_maps(
+            sdfg=sdfg,
+            validate=validate,
+            validate_all=validate_all,
         )
         gtx_transformations.gt_simplify(sdfg, validate=validate, validate_all=validate_all)
 
@@ -160,62 +155,9 @@ def gt_gpu_transform_non_standard_memlet(
             correct loop order.
         - This function should be called after `gt_set_iteration_order()` has run.
     """
-    new_maps: set[dace_nodes.MapEntry] = set()
 
-    # This code is is copied from DaCe's code generator.
-    for e, state in list(sdfg.all_edges_recursive()):
-        nsdfg = state.parent
-        if (
-            isinstance(e.src, dace_nodes.AccessNode)
-            and isinstance(e.dst, dace_nodes.AccessNode)
-            and e.src.desc(nsdfg).storage == dace_dtypes.StorageType.GPU_Global
-            and e.dst.desc(nsdfg).storage == dace_dtypes.StorageType.GPU_Global
-        ):
-            a: dace_nodes.AccessNode = e.src
-            b: dace_nodes.AccessNode = e.dst
-
-            copy_shape, src_strides, dst_strides, _, _ = dace_cpp.memlet_copy_to_absolute_strides(
-                None, nsdfg, state, e, a, b
-            )
-            dims = len(copy_shape)
-            if dims == 1:
-                continue
-            elif dims == 2:
-                if src_strides[-1] != 1 or dst_strides[-1] != 1:
-                    try:
-                        is_src_cont = src_strides[0] / src_strides[1] == copy_shape[1]
-                        is_dst_cont = dst_strides[0] / dst_strides[1] == copy_shape[1]
-                    except (TypeError, ValueError):
-                        is_src_cont = False
-                        is_dst_cont = False
-                    if is_src_cont and is_dst_cont:
-                        continue
-                else:
-                    continue
-            elif dims > 2:
-                if not (src_strides[-1] != 1 or dst_strides[-1] != 1):
-                    continue
-
-            # For identifying the new map, we first store all neighbors of `a`.
-            old_neighbors_of_a: list[dace_nodes.AccessNode] = [
-                edge.dst for edge in state.out_edges(a)
-            ]
-
-            # Turn unsupported copy to a map
-            try:
-                dace_transformation.dataflow.CopyToMap.apply_to(
-                    nsdfg, save=False, annotate=False, a=a, b=b
-                )
-            except ValueError:  # If transformation doesn't match, continue normally
-                continue
-
-            # We find the new map by comparing the new neighborhood of `a` with the old one.
-            new_nodes: set[dace_nodes.MapEntry] = {
-                edge.dst for edge in state.out_edges(a) if edge.dst not in old_neighbors_of_a
-            }
-            assert any(isinstance(new_node, dace_nodes.MapEntry) for new_node in new_nodes)
-            assert len(new_nodes) == 1
-            new_maps.update(new_nodes)
+    # Expand all non standard memlets and get the new MapEntries.
+    new_maps: set[dace_nodes.MapEntry] = _gt_expand_non_standard_memlets(sdfg)
 
     # If there are no Memlets that are translated to copy-Maps, then we have nothing to do.
     if len(new_maps) == 0:
@@ -224,7 +166,7 @@ def gt_gpu_transform_non_standard_memlet(
     # This function allows to restrict any fusion operation to the maps
     #  that we have just created.
     def restrict_fusion_to_newly_created_maps(
-        self: gtx_transformations.map_fusion_helper.MapFusionHelper,
+        self: gtx_transformations.MapFusion,
         map_entry_1: dace_nodes.MapEntry,
         map_entry_2: dace_nodes.MapEntry,
         graph: Union[dace.SDFGState, dace.SDFG],
@@ -281,6 +223,95 @@ def gt_gpu_transform_non_standard_memlet(
         )
 
     return sdfg
+
+
+def _gt_expand_non_standard_memlets(
+    sdfg: dace.SDFG,
+) -> set[dace_nodes.MapEntry]:
+    """Finds all non standard Memlet in the SDFG and expand them.
+
+    The function is used by `gt_gpu_transform_non_standard_memlet()` and performs
+    the actual expansion of the Memlet, i.e. turning all Memlets that can not be
+    expressed as a `memcpy()` into a Map, copy kernel.
+    The function will return the MapEntries of all expanded.
+
+    The function will process the SDFG recursively.
+    """
+    new_maps: set[dace_nodes.MapEntry] = set()
+    for nsdfg in sdfg.all_sdfgs_recursive():
+        new_maps.update(_gt_expand_non_standard_memlets_sdfg(nsdfg))
+    return new_maps
+
+
+def _gt_expand_non_standard_memlets_sdfg(
+    sdfg: dace.SDFG,
+) -> set[dace_nodes.MapEntry]:
+    """Implementation of `_gt_expand_non_standard_memlets()` that process a single SDFG."""
+    new_maps: set[dace_nodes.MapEntry] = set()
+    # The implementation is based on DaCe's code generator.
+    for state in sdfg.states():
+        for e in state.edges():
+            # We are only interested in edges that connects two access nodes of GPU memory.
+            if not (
+                isinstance(e.src, dace_nodes.AccessNode)
+                and isinstance(e.dst, dace_nodes.AccessNode)
+                and e.src.desc(sdfg).storage == dace_dtypes.StorageType.GPU_Global
+                and e.dst.desc(sdfg).storage == dace_dtypes.StorageType.GPU_Global
+            ):
+                continue
+
+            a: dace_nodes.AccessNode = e.src
+            b: dace_nodes.AccessNode = e.dst
+            copy_shape, src_strides, dst_strides, _, _ = dace_cpp.memlet_copy_to_absolute_strides(
+                None, sdfg, state, e, a, b
+            )
+            dims = len(copy_shape)
+            if dims == 1:
+                continue
+            elif dims == 2:
+                if src_strides[-1] != 1 or dst_strides[-1] != 1:
+                    try:
+                        is_src_cont = src_strides[0] / src_strides[1] == copy_shape[1]
+                        is_dst_cont = dst_strides[0] / dst_strides[1] == copy_shape[1]
+                    except (TypeError, ValueError):
+                        is_src_cont = False
+                        is_dst_cont = False
+                    if is_src_cont and is_dst_cont:
+                        continue
+                else:
+                    continue
+            elif dims > 2:
+                if not (src_strides[-1] != 1 or dst_strides[-1] != 1):
+                    continue
+
+            # For identifying the new map, we first store all neighbors of `a`.
+            old_neighbors_of_a: list[dace_nodes.AccessNode] = [
+                edge.dst for edge in state.out_edges(a)
+            ]
+
+            # Turn unsupported copy to a map
+            try:
+                dace_transformation.dataflow.CopyToMap.apply_to(
+                    sdfg,
+                    save=False,
+                    annotate=False,
+                    a=a,
+                    b=b,
+                    options={
+                        "ignore_strides": True
+                    },  # apply 'CopyToMap' even if src/dst strides are different
+                )
+            except ValueError:  # If transformation doesn't match, continue normally
+                continue
+
+            # We find the new map by comparing the new neighborhood of `a` with the old one.
+            new_nodes: set[dace_nodes.MapEntry] = {
+                edge.dst for edge in state.out_edges(a) if edge.dst not in old_neighbors_of_a
+            }
+            assert any(isinstance(new_node, dace_nodes.MapEntry) for new_node in new_nodes)
+            assert len(new_nodes) == 1
+            new_maps.update(new_nodes)
+    return new_maps
 
 
 def gt_set_gpu_blocksize(
@@ -542,6 +573,80 @@ class GPUSetBlockSize(dace_transformation.SingleStateTransformation):
             gpu_map.gpu_launch_bounds = launch_bounds
 
 
+def gt_remove_trivial_gpu_maps(
+    sdfg: dace.SDFG,
+    validate: bool = True,
+    validate_all: bool = False,
+) -> dace.SDFG:
+    """Removes trivial maps that were created by the GPU transformation.
+
+    The main problem is that a Tasklet outside of a Map cannot write into an
+    _array_ that is on GPU. `sdfg.apply_gpu_transformations()` will wrap such
+    Tasklets in a Map. The `GT4PyMoveTaskletIntoMap` pass, that runs before,
+    but only works if the tasklet is adjacent to a map.
+
+    It first tries to promote them such that they can be fused in other non-trivial
+    maps, it will then also perform fusion on them, to reduce the number of kernel
+    calls.
+
+    Args:
+        sdfg: The SDFG that we process.
+        validate: Perform validation at the end of the function.
+        validate_all: Perform validation also on intermediate steps.
+    """
+
+    # First we try to promote and fuse them with other non-trivial maps.
+    sdfg.apply_transformations_once_everywhere(
+        TrivialGPUMapElimination(
+            do_not_fuse=False,
+            only_gpu_maps=True,
+        ),
+        validate=False,
+        validate_all=False,
+    )
+    gtx_transformations.gt_simplify(sdfg, validate=validate, validate_all=validate_all)
+
+    # Now we try to fuse them together, however, we restrict the fusion to trivial
+    #  GPU map.
+    def restrict_to_trivial_gpu_maps(
+        self: gtx_transformations.MapFusion,
+        map_entry_1: dace_nodes.MapEntry,
+        map_entry_2: dace_nodes.MapEntry,
+        graph: Union[dace.SDFGState, dace.SDFG],
+        sdfg: dace.SDFG,
+        permissive: bool,
+    ) -> bool:
+        for map_entry in [map_entry_1, map_entry_2]:
+            _map = map_entry.map
+            if len(_map.params) != 1:
+                return False
+            if _map.range[0][0] != _map.range[0][1]:
+                return False
+            if _map.schedule not in [
+                dace.dtypes.ScheduleType.GPU_Device,
+                dace.dtypes.ScheduleType.GPU_Default,
+            ]:
+                return False
+        return True
+
+    sdfg.apply_transformations_repeated(
+        [
+            gtx_transformations.MapFusionSerial(
+                only_toplevel_maps=True,
+                apply_fusion_callback=restrict_to_trivial_gpu_maps,
+            ),
+            gtx_transformations.MapFusionParallel(
+                only_toplevel_maps=True,
+                apply_fusion_callback=restrict_to_trivial_gpu_maps,
+            ),
+        ],
+        validate=validate,
+        validate_all=validate_all,
+    )
+
+    return sdfg
+
+
 @dace_properties.make_properties
 class TrivialGPUMapElimination(dace_transformation.SingleStateTransformation):
     """Eliminate certain kind of trivial GPU maps.
@@ -661,9 +766,9 @@ class TrivialGPUMapElimination(dace_transformation.SingleStateTransformation):
             self._promote_map(graph, replace_trivail_map_parameter=False)
             if not gtx_transformations.MapFusionSerial.can_be_applied_to(
                 sdfg=sdfg,
-                map_exit_1=trivial_map_exit,
-                intermediate_access_node=self.access_node,
-                map_entry_2=self.second_map_entry,
+                first_map_exit=trivial_map_exit,
+                array=self.access_node,
+                second_map_entry=self.second_map_entry,
             ):
                 return False
         finally:
@@ -689,9 +794,9 @@ class TrivialGPUMapElimination(dace_transformation.SingleStateTransformation):
         if not self.do_not_fuse:
             gtx_transformations.MapFusionSerial.apply_to(
                 sdfg=sdfg,
-                map_exit_1=trivial_map_exit,
-                intermediate_access_node=access_node,
-                map_entry_2=second_map_entry,
+                first_map_exit=trivial_map_exit,
+                array=access_node,
+                second_map_entry=second_map_entry,
                 verify=True,
             )
 

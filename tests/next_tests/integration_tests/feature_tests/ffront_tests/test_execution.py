@@ -7,8 +7,10 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from functools import reduce
+
 import numpy as np
 import pytest
+
 import gt4py.next as gtx
 from gt4py.next import (
     astype,
@@ -21,9 +23,9 @@ from gt4py.next import (
     int64,
     minimum,
     neighbor_sum,
+    utils as gt_utils,
 )
 from gt4py.next.ffront.experimental import as_offset
-from gt4py.next import utils as gt_utils
 
 from next_tests.integration_tests import cases
 from next_tests.integration_tests.cases import (
@@ -31,6 +33,7 @@ from next_tests.integration_tests.cases import (
     E2V,
     V2E,
     E2VDim,
+    Edge,
     IDim,
     Ioff,
     JDim,
@@ -38,7 +41,6 @@ from next_tests.integration_tests.cases import (
     Koff,
     V2EDim,
     Vertex,
-    Edge,
     cartesian_case,
     unstructured_case,
     unstructured_case_3d,
@@ -196,6 +198,21 @@ def test_scalar_arg(unstructured_case):
     )
 
 
+def test_np_bool_scalar_arg(unstructured_case):
+    """Test scalar argument being turned into 0-dim field."""
+
+    @gtx.field_operator
+    def testee(a: gtx.bool) -> cases.VBoolField:
+        return broadcast(not a, (Vertex,))
+
+    a = np.bool_(True)  # explicitly using a np.bool
+
+    ref = np.full([unstructured_case.default_sizes[Vertex]], not a, dtype=np.bool_)
+    out = cases.allocate(unstructured_case, testee, cases.RETURN)()
+
+    cases.verify(unstructured_case, testee, a, out=out, ref=ref)
+
+
 def test_nested_scalar_arg(unstructured_case):
     @gtx.field_operator
     def testee_inner(a: int32) -> cases.VField:
@@ -262,9 +279,7 @@ def test_mixed_field_scalar_tuple_arg(cartesian_case):
 
 
 @pytest.mark.uses_tuple_args
-@pytest.mark.xfail(
-    reason="Not implemented in frontend (implicit size arg handling needs to be adopted) and GTIR embedded backend."
-)
+@pytest.mark.uses_tuple_args_with_different_but_promotable_dims
 def test_tuple_arg_with_different_but_promotable_dims(cartesian_case):
     @gtx.field_operator
     def testee(a: tuple[cases.IField, cases.IJField]) -> cases.IJField:
@@ -752,7 +767,16 @@ def test_solve_triag(cartesian_case):
         matrices[:, :, i[1:], i[:-1]] = a[:, :, 1:]
         matrices[:, :, i, i] = b
         matrices[:, :, i[:-1], i[1:]] = c[:, :, :-1]
-        return np.linalg.solve(matrices, d)
+        # Changed in NumPY version 2.0: In a linear matrix equation ax = b, the b array
+        # is only treated as a shape (M,) column vector if it is exactly 1-dimensional.
+        # In all other instances it is treated as a stack of (M, K) matrices. Therefore
+        # below we add an extra dimension (K) of size 1. Previously b would be treated
+        # as a stack of (M,) vectors if b.ndim was equal to a.ndim - 1.
+        # Refer to https://numpy.org/doc/2.0/reference/generated/numpy.linalg.solve.html
+        d_ext = np.empty(shape=(*shape, 1))
+        d_ext[:, :, :, 0] = d
+        x = np.linalg.solve(matrices, d_ext)
+        return x[:, :, :, 0]
 
     cases.verify_with_default_data(cartesian_case, solve_tridiag, ref=expected)
 
@@ -821,7 +845,6 @@ def test_ternary_builtin_neighbor_sum(unstructured_case):
 
 
 @pytest.mark.uses_scan
-@pytest.mark.uses_scan_1d_field
 def test_ternary_scan(cartesian_case):
     @gtx.scan_operator(axis=KDim, forward=True, init=0.0)
     def simple_scan_operator(carry: float, a: float) -> float:

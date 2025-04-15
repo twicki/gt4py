@@ -61,7 +61,7 @@ def register(func=None, *, externals=None, name=None):
     return _register_decorator(func) if func else _register_decorator
 
 
-Field3D = gtscript.Field[np.float_]
+Field3D = gtscript.Field[np.float64]
 Field3DBool = gtscript.Field[np.bool_]
 
 
@@ -295,7 +295,8 @@ def large_k_interval(in_field: Field3D, out_field: Field3D):
     with computation(PARALLEL):
         with interval(0, 6):
             out_field = in_field
-        with interval(6, -10):  # this stage will only run if field has more than 16 elements
+        # this stenicl is only legal to call with fields that have more than 16 elements
+        with interval(6, -10):
             out_field = in_field + 1
         with interval(-10, None):
             out_field = in_field

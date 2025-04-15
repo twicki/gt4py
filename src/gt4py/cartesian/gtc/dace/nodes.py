@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 import pickle
 import typing
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, Final, List, Optional, Set, Union
 
 import dace.data
 import dace.dtypes
@@ -23,11 +23,11 @@ from dace import library
 from gt4py.cartesian.gtc import common, oir
 from gt4py.cartesian.gtc.dace import daceir as dcir
 from gt4py.cartesian.gtc.dace.expansion.expansion import StencilComputationExpansion
+from gt4py.cartesian.gtc.dace.expansion.utils import HorizontalExecutionSplitter
+from gt4py.cartesian.gtc.dace.expansion_specification import ExpansionItem, make_expansion_order
+from gt4py.cartesian.gtc.dace.utils import get_dace_debuginfo
 from gt4py.cartesian.gtc.definitions import Extent
 from gt4py.cartesian.gtc.oir import Decl, FieldDecl, VerticalLoop, VerticalLoopSection
-
-from .expansion.utils import HorizontalExecutionSplitter, get_dace_debuginfo
-from .expansion_specification import ExpansionItem, make_expansion_order
 
 
 def _set_expansion_order(
@@ -80,7 +80,7 @@ class PickledDictProperty(PickledProperty, dace.properties.DictProperty):
 
 @library.node
 class StencilComputation(library.LibraryNode):
-    implementations: Dict[str, dace.library.ExpandTransformation] = {
+    implementations: Final[Dict[str, dace.library.ExpandTransformation]] = {
         "default": StencilComputationExpansion
     }
     default_implementation = "default"

@@ -657,7 +657,10 @@ def _reshuffling_premap(
             conn_map[dim] = _identity_connectivity(new_domain, dim, cls=type(connectivity))
 
     # Take data
-    take_indices = tuple(conn_map[dim].ndarray for dim in data.domain.dims)
+    take_indices = tuple(
+        conn_map[dim].ndarray - data.domain[dim].unit_range.start  # shift to 0-based indexing
+        for dim in data.domain.dims
+    )
     new_buffer = data._ndarray.__getitem__(take_indices)
 
     return data.__class__.from_array(
@@ -758,7 +761,8 @@ def _hyperslice(
     nnz: tuple[core_defs.NDArrayObject, ...] = xp.nonzero(select_mask)
 
     slices = tuple(
-        slice(xp.min(dim_nnz_indices), xp.max(dim_nnz_indices) + 1) for dim_nnz_indices in nnz
+        slice(xp.min(dim_nnz_indices).item(), xp.max(dim_nnz_indices).item() + 1)
+        for dim_nnz_indices in nnz
     )
     hcube = select_mask[tuple(slices)]
     if skip_value is not None:

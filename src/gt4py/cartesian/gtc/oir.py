@@ -42,6 +42,10 @@ class IteratorAccess(Expr):
     name: AxisName
 
 
+class CodeBlock(common.BlockStmt[Stmt], Stmt):
+    label: str
+
+
 class Literal(common.Literal, Expr):
     pass
 

@@ -33,6 +33,8 @@ nox.options.sessions = [
     "test_next-3.10(dace, cpu, nomesh)",
     "test_next-3.11(internal, cpu, nomesh)",
     "test_next-3.11(dace, cpu, nomesh)",
+    "test_package-3.10",
+    "test_package-3.11",
     "test_storage-3.10(cpu)",
     "test_storage-3.11(cpu)",
 ]
@@ -61,6 +63,10 @@ CodeGenTestSettings: Final[dict[str, dict[str, Sequence]]] = {
     "internal": {"extras": [], "markers": ["not requires_dace"]},
     "dace": {"extras": ["dace"], "markers": ["requires_dace"]},
 }
+# Use dace-next for GT4Py-next, to install a different dace version than in cartesian
+CodeGenNextTestSettings = CodeGenTestSettings | {
+    "dace": {"extras": ["dace-next"], "markers": ["requires_dace"]},
+}
 
 
 # -- nox sessions --
@@ -83,11 +89,11 @@ def test_cartesian(
         groups=["test"],
     )
 
-    num_processes = session.env.get("NUM_PROCESSES", "auto")
+    num_processes = os.environ.get("NUM_PROCESSES", "auto")
     markers = " and ".join(codegen_settings["markers"] + device_settings["markers"])
 
     session.run(
-        *f"pytest --cache-clear -sv -n {num_processes}".split(),
+        *f"pytest --cache-clear -sv -n {num_processes} --dist loadgroup".split(),
         *("-m", f"{markers}"),
         str(pathlib.Path("tests") / "cartesian_tests"),
         *session.posargs,
@@ -95,6 +101,25 @@ def test_cartesian(
     session.run(
         *"pytest --doctest-modules --doctest-ignore-import-errors -sv".split(),
         str(pathlib.Path("src") / "gt4py" / "cartesian"),
+    )
+
+
+@nox.session(python=["3.10", "3.11"], tags=["cartesian", "next", "cpu"])
+def test_eve(session: nox.Session) -> None:
+    """Run 'gt4py.eve' tests."""
+
+    _install_session_venv(session, groups=["test"])
+
+    num_processes = os.environ.get("NUM_PROCESSES", "auto")
+
+    session.run(
+        *f"pytest --cache-clear -sv -n {num_processes}".split(),
+        str(pathlib.Path("tests") / "eve_tests"),
+        *session.posargs,
+    )
+    session.run(
+        *"pytest --doctest-modules -sv".split(),
+        str(pathlib.Path("src") / "gt4py" / "eve"),
     )
 
 
@@ -107,7 +132,6 @@ def test_examples(session: nox.Session) -> None:
     session.run(*"jupytext docs/user/next/QuickstartGuide.md --to .ipynb".split())
     session.run(*"jupytext docs/user/next/advanced/*.md --to .ipynb".split())
 
-    num_processes = session.env.get("NUM_PROCESSES", "auto")
     for notebook, extra_args in [
         ("docs/user/next/workshop/slides", None),
         ("docs/user/next/workshop/exercises", ["-k", "solutions"]),
@@ -116,28 +140,9 @@ def test_examples(session: nox.Session) -> None:
         ("examples", (None)),
     ]:
         session.run(
-            *f"pytest --nbmake {notebook} -sv -n {num_processes}".split(),
+            *f"pytest --nbmake {notebook} -sv -n 1 --benchmark-disable".split(),
             *(extra_args or []),
         )
-
-
-@nox.session(python=["3.10", "3.11"], tags=["cartesian", "next", "cpu"])
-def test_eve(session: nox.Session) -> None:
-    """Run 'gt4py.eve' tests."""
-
-    _install_session_venv(session, groups=["test"])
-
-    num_processes = session.env.get("NUM_PROCESSES", "auto")
-
-    session.run(
-        *f"pytest --cache-clear -sv -n {num_processes}".split(),
-        str(pathlib.Path("tests") / "eve_tests"),
-        *session.posargs,
-    )
-    session.run(
-        *"pytest --doctest-modules -sv".split(),
-        str(pathlib.Path("src") / "gt4py" / "eve"),
-    )
 
 
 @nox.session(python=["3.10", "3.11"], tags=["next"])
@@ -158,7 +163,7 @@ def test_next(
 ) -> None:
     """Run selected 'gt4py.next' tests."""
 
-    codegen_settings = CodeGenTestSettings[codegen]
+    codegen_settings = CodeGenNextTestSettings[codegen]
     device_settings = DeviceTestSettings[device]
     groups: list[str] = ["test"]
     mesh_markers: list[str] = []
@@ -176,7 +181,7 @@ def test_next(
         groups=groups,
     )
 
-    num_processes = session.env.get("NUM_PROCESSES", "auto")
+    num_processes = os.environ.get("NUM_PROCESSES", "auto")
     markers = " and ".join(codegen_settings["markers"] + device_settings["markers"] + mesh_markers)
 
     session.run(
@@ -189,6 +194,26 @@ def test_next(
     session.run(
         *"pytest --doctest-modules --doctest-ignore-import-errors -sv".split(),
         str(pathlib.Path("src") / "gt4py" / "next"),
+        success_codes=[0, NO_TESTS_COLLECTED_EXIT_CODE],
+    )
+
+
+@nox.session(python=["3.10", "3.11"], tags=["cartesian", "next", "cpu"])
+def test_package(session: nox.Session) -> None:
+    """Run 'gt4py' package level tests."""
+
+    _install_session_venv(session, groups=["test"])
+
+    session.run(
+        *f"pytest --cache-clear -sv".split(),
+        str(pathlib.Path("tests") / "package_tests"),
+        *session.posargs,
+    )
+
+    modules = [str(path) for path in (pathlib.Path("src") / "gt4py").glob("*.py")]
+    session.run(
+        *"pytest --doctest-modules --doctest-ignore-import-errors -sv".split(),
+        *modules,
         success_codes=[0, NO_TESTS_COLLECTED_EXIT_CODE],
     )
 
@@ -207,7 +232,7 @@ def test_storage(
         session, extras=["performance", "testing", *device_settings["extras"]], groups=["test"]
     )
 
-    num_processes = session.env.get("NUM_PROCESSES", "auto")
+    num_processes = os.environ.get("NUM_PROCESSES", "auto")
     markers = " and ".join(device_settings["markers"])
 
     session.run(

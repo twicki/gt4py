@@ -7,6 +7,7 @@ _local
 /tests/__init__.py
 .gt_cache/
 .gt_cache*/
+.gt4py_cache/
 .gt_cache_pytest*/
 
 # DaCe

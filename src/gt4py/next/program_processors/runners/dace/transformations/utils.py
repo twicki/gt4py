@@ -8,13 +8,18 @@
 
 """Common functionality for the transformations/optimization pipeline."""
 
-from typing import Any, Container, Optional, Union
+from typing import Any, Container, Optional, Sequence, TypeVar, Union
 
 import dace
-from dace import data as dace_data
-from dace.sdfg import nodes as dace_nodes
+from dace import data as dace_data, subsets as dace_sbs, symbolic as dace_sym
+from dace.sdfg import graph as dace_graph, nodes as dace_nodes
+from dace.transformation import pass_pipeline as dace_ppl
+from dace.transformation.passes import analysis as dace_analysis
 
 from gt4py.next.program_processors.runners.dace import utils as gtx_dace_utils
+
+
+_PassT = TypeVar("_PassT", bound=dace_ppl.Pass)
 
 
 def gt_make_transients_persistent(
@@ -134,13 +139,14 @@ def is_accessed_downstream(
     start_state: dace.SDFGState,
     sdfg: dace.SDFG,
     data_to_look: str,
+    reachable_states: Optional[dict[dace.SDFGState, set[dace.SDFGState]]],
     nodes_to_ignore: Optional[set[dace_nodes.AccessNode]] = None,
     states_to_ignore: Optional[set[dace.SDFGState]] = None,
 ) -> bool:
     """Scans for accesses to the data container `data_to_look`.
 
     The function will go through states that are reachable from `start_state`
-    (included) and test if there is an AccessNode that refers to `data_to_look`.
+    (included) and test if there is an AccessNode that _reads_ from `data_to_look`.
     It will return `True` the first time it finds such a node.
 
     The function will ignore all nodes that are listed in `nodes_to_ignore`.
@@ -151,44 +157,125 @@ def is_accessed_downstream(
         start_state: The state where the scanning starts.
         sdfg: The SDFG on which we operate.
         data_to_look: The data that we want to look for.
+        reachable_states: Maps an `SDFGState` to all `SDFGState`s that can be reached.
+            If `None` it will be computed, but this is not recommended.
         nodes_to_ignore: Ignore these nodes.
         states_to_ignore: Ignore these states.
+
+    Note:
+        Currently, the function will not only ignore the states that are listed in
+        `states_to_ignore`, but all that are reachable from any of these states.
+        Thus care must be taken when this option is used. Furthermore, this behaviour
+        is not intended and will change in further versions.
+        `reachable_states` can be computed by using the `StateReachability` analysis
+        pass from DaCe.
+
+    Todo:
+        - Modify the function such that it is no longer necessary to pass the
+            `reachable_states` argument.
+        - Fix the behaviour for `states_to_ignore`.
     """
-    seen_states: set[dace.SDFGState] = set()
-    to_visit: list[dace.SDFGState] = [start_state]
+    # After DaCe 1 switched to a hierarchical version of the state machine. Thus
+    #  it is no longer possible in a simple way to traverse the SDFG. As a temporary
+    #  solution we use the `StateReachability` pass. However, this has some issues,
+    #  see the note about `states_to_ignore`.
+    if reachable_states is None:
+        state_reachability_pass = dace_analysis.StateReachability()
+        reachable_states = state_reachability_pass.apply_pass(sdfg, None)[sdfg.cfg_id]
+    else:
+        # Ensures that the externally generated result was passed properly.
+        assert all(
+            isinstance(state, dace.SDFGState) and state.sdfg is sdfg for state in reachable_states
+        )
+
     ign_dnodes: set[dace_nodes.AccessNode] = nodes_to_ignore or set()
     ign_states: set[dace.SDFGState] = states_to_ignore or set()
 
-    while len(to_visit) > 0:
-        state = to_visit.pop()
-        seen_states.add(state)
-        for dnode in state.data_nodes():
+    # NOTE: We have to include `start_state`, however, we must also consider the
+    #  data in `reachable_states` as immutable, so we have to do it this way.
+    # TODO(phimuell): Go back to a trivial scan of the graph.
+    if start_state not in reachable_states:
+        # This can mean different things, either there was only one state to begin
+        #  with or `start_state` is the last one. In this case the `states_to_scan`
+        #  set consists only of the `start_state` because we have to process it.
+        states_to_scan = {start_state}
+    else:
+        # Ensure that `start_state` is scanned.
+        states_to_scan = reachable_states[start_state].union([start_state])
+
+    # In the first version we explored the state machine and if we encountered a
+    #  state in the ignore set we simply ignored it. This is no longer possible.
+    #  Instead we will remove all states from the `states_to_scan` that are reachable
+    #  from an ignored state. However, this is not the same as if we would explore
+    #  the state machine (as we did before). Consider the following case:
+    #
+    #   (STATE_1) ------------> (STATE_2)
+    #       |                       /\
+    #       V                       |
+    #   (STATE_3) ------------------+
+    #
+    #  Assume that `STATE_1` is the starting state and `STATE_3` is ignored.
+    #  If we would explore the state machine, we would still scan `STATE_2`.
+    #  However, because `STATE_2` is also reachable from `STATE_3` it will now be
+    #  ignored. In most cases this should be fine, but we have to handle it.
+    states_to_scan.difference_update(ign_states)
+    for ign_state in ign_states:
+        states_to_scan.difference_update(reachable_states.get(ign_state, set()))
+    assert start_state in states_to_scan
+
+    for downstream_state in states_to_scan:
+        if downstream_state in ign_states:
+            continue
+        for dnode in downstream_state.data_nodes():
             if dnode.data != data_to_look:
                 continue
             if dnode in ign_dnodes:
                 continue
-            if state.out_degree(dnode) != 0:
+            if downstream_state.out_degree(dnode) != 0:
                 return True  # There is a read operation
+    return False
 
-        # Look for new states, also scan the interstate edges.
-        for out_edge in sdfg.out_edges(state):
-            if out_edge.dst in ign_states:
-                continue
-            if data_to_look in out_edge.data.read_symbols():
-                return True
-            if out_edge.dst in seen_states:
-                continue
-            to_visit.append(out_edge.dst)
+
+def is_reachable(
+    start: Union[dace_nodes.Node, Sequence[dace_nodes.Node]],
+    target: Union[dace_nodes.Node, Sequence[dace_nodes.Node]],
+    state: dace.SDFGState,
+) -> bool:
+    """Explores the graph from `start` and checks if `target` is reachable.
+
+    The exploration of the graph is done in a way that ignores the connector names.
+    It is possible to pass multiple start nodes and targets. In case of multiple target nodes, the function returns True if any of them is reachable.
+
+    Args:
+        start: The node from where to start.
+        target: The node to look for.
+        state: The SDFG state on which we operate.
+    """
+    to_visit: list[dace_nodes.Node] = [start] if isinstance(start, dace_nodes.Node) else list(start)
+    targets: set[dace_nodes.Node] = {target} if isinstance(target, dace_nodes.Node) else set(target)
+    seen: set[dace_nodes.Node] = set()
+
+    while to_visit:
+        node = to_visit.pop()
+        if node in targets:
+            return True
+        seen.add(node)
+        to_visit.extend(oedge.dst for oedge in state.out_edges(node) if oedge.dst not in seen)
 
     return False
 
 
 def is_view(
     node: Union[dace_nodes.AccessNode, dace_data.Data],
-    sdfg: dace.SDFG,
+    sdfg: Optional[dace.SDFG] = None,
 ) -> bool:
     """Tests if `node` points to a view or not."""
-    node_desc: dace_data.Data = node.desc(sdfg) if isinstance(node, dace_nodes.AccessNode) else node
+    if isinstance(node, dace_nodes.AccessNode):
+        assert sdfg is not None
+        node_desc = node.desc(sdfg)
+    else:
+        assert isinstance(node, dace_data.Data)
+        node_desc = node
     return isinstance(node_desc, dace_data.View)
 
 
@@ -235,3 +322,214 @@ def track_view(
             raise RuntimeError(f"View tracing of '{org_view}' failed at note '{view}'.")
         view = next_node(curr_edge)
     return view
+
+
+def reroute_edge(
+    is_producer_edge: bool,
+    current_edge: dace_graph.MultiConnectorEdge,
+    ss_offset: Sequence[dace_sym.SymExpr],
+    state: dace.SDFGState,
+    sdfg: dace.SDFG,
+    old_node: dace_nodes.AccessNode,
+    new_node: dace_nodes.AccessNode,
+) -> dace_graph.MultiConnectorEdge:
+    """Performs the rerouting of the edge.
+
+    Essentially the function create a new edge that replaces `old_node` with `new_node`.
+    Depending on the value of `is_producer_edge` the behaviour is slightly different.
+
+    If `is_producer_edge` is `True` then the function expects that `current_edge`
+    is an edge that _ends_ at `old_node`. It will then create a new edge that starts
+    at the source of `current_edge` but will end in `new_node` and have a similar
+    Memlet than `current_edge`.
+    If `is_producer_edge` is `False` then it assumes `current_edge` starts at
+    `old_node`. It will then create a new edge that starts at `new_node` and has a
+    similar Memlet than the original one.
+    To modify the subsets where `new_node` is read/written the `ss_offset` is
+    provided, this value is added to the current subset.
+
+    It is important that the function will **not** do the following things:
+    - Remove the old edge, i.e. `producer_edge`.
+    - Modify the data flow at the other side of the edge, to account of the change
+        from `old_node` to `new_node`. If this should be modified see
+        `reconfigure_dataflow_after_rerouting()`.
+
+    The function returns the new edge.
+
+    Args:
+        is_producer_edge: Indicates how to interpret `current_edge`.
+        current_edge: The current edge that should be replaced.
+        ss_offset: Offset that describes how much to shift writes and reads,
+            that were previously associated with `old_node`.
+        state: The state in which we operate.
+        sdfg: The SDFG on which we operate on.
+        old_node: The old that should be replaced in `current_edge`.
+        new_node: The new node that should be used instead of `old_node`.
+    """
+    current_memlet: dace.Memlet = current_edge.data
+    if is_producer_edge:
+        # NOTE: See the note in `_reconfigure_dataflow()` why it is not save to
+        #  use the `get_{dst, src}_subset()` function, although it would be more
+        #  appropriate.
+        assert current_edge.dst is old_node
+        current_subset: dace_sbs.Range = current_memlet.dst_subset
+        new_src = current_edge.src
+        new_src_conn = current_edge._src_conn
+        new_dst = new_node
+        new_dst_conn = None
+        assert current_edge.dst_conn is None
+    else:
+        assert current_edge.src is old_node
+        current_subset = current_memlet.src_subset
+        new_src = new_node
+        new_src_conn = None
+        new_dst = current_edge.dst
+        new_dst_conn = current_edge.dst_conn
+        assert current_edge.src_conn is None
+
+    # If the subset we care about, which is always on the `old_node` side, was not
+    #  specified we assume that the whole `old_node` has been written.
+    # TODO(edopao): Fix lowering that this does not happens, it happens for example
+    #  in `tests/next_tests/integration_tests/feature_tests/ffront_tests/
+    #  test_execution.py::test_docstring`.
+    if current_subset is None:
+        current_subset = dace_sbs.Range.from_array(old_node.desc(sdfg))
+
+    # This is the new Memlet, that we will use. We copy it from the original
+    #  Memlet and modify it later.
+    new_memlet: dace.Memlet = dace.Memlet.from_memlet(current_memlet)
+
+    # Because we operate on the `subset` and `other_subset` properties directly
+    #  we do not need to distinguish between the different directions. Also
+    #  in both cases the offset is the same.
+    if new_memlet.data == old_node.data:
+        new_memlet.data = new_node.data
+        new_subset = current_subset.offset_new(ss_offset, negative=False)
+        new_memlet.subset = new_subset
+    else:
+        new_subset = current_subset.offset_new(ss_offset, negative=False)
+        new_memlet.other_subset = new_subset
+
+    new_edge = state.add_edge(
+        new_src,
+        new_src_conn,
+        new_dst,
+        new_dst_conn,
+        new_memlet,
+    )
+    assert (  # Ensure that the edge has the right direction.
+        new_subset is new_edge.data.dst_subset
+        if is_producer_edge
+        else new_subset is new_edge.data.src_subset
+    )
+    return new_edge
+
+
+def reconfigure_dataflow_after_rerouting(
+    is_producer_edge: bool,
+    new_edge: dace_graph.MultiConnectorEdge,
+    ss_offset: Sequence[dace_sym.SymExpr] | None,
+    state: dace.SDFGState,
+    sdfg: dace.SDFG,
+    old_node: dace_nodes.AccessNode,
+    new_node: dace_nodes.AccessNode,
+) -> None:
+    """Modify the data flow associated to `new_edge`.
+
+    While the `reroute_edge()` function creates a new edge, it does not modify
+    the dataflow at the other side of the connection, this is done by this
+    function.
+
+    Depending on the value of `is_producer_edge` the function will either modify
+    the source of `new_edge` (`True`) or it will modify the data flow associated
+    to the destination of `new_edge` (`False`).
+    Furthermore, the specific actions depends on what kind of node is on the other
+    side. However, essentially the function will modify it to account for the
+    change from `old_node` to `new_node`.
+
+    When using this function the user has to consider the following things:
+    - It is the caller's responsibility to ensure that this function is not called
+        multiple times on the same producer target.
+    - The function will not propagate new strides, this must be done separately.
+    - The function will not modify the ranges of Maps.
+
+    Args:
+        is_producer_edge: If `True` then the source of `new_edge` is processed,
+            if `False` then the destination part of `new_edge` is processed.
+        new_edge: The newly created edge, essentially the return value of
+            `reroute__edge()`.
+        ss_offsets: Offset that describes how much to shift subsets associated
+            to `old_node` to account that they are now associated to `new_node`.
+            If `None` then `new_node` needs to be a scalar.
+        state: The state in which we operate.
+        sdfg: The SDFG on which we operate.
+        old_node: The old that was involved in the old, rerouted, edge.
+        new_node: The new node that should be used instead of `old_node`.
+    """
+    other_node = new_edge.src if is_producer_edge else new_edge.dst
+
+    if isinstance(other_node, dace_nodes.AccessNode):
+        # There is nothing here to do.
+        pass
+
+    elif isinstance(other_node, dace_nodes.Tasklet):
+        # A very obscure case, but I think it might happen, but as in the AccessNode
+        #  case there is nothing to do here.
+        pass
+
+    elif isinstance(other_node, (dace_nodes.MapExit | dace_nodes.MapEntry)):
+        # Essentially, we have to propagate the change that everything that
+        #  refers to `old_node` should now refer to `new_node`, In addition we also
+        #  have to modify the subsets, depending on the direction of the new edge
+        #  either the source or destination subset.
+        # NOTE: Also for this case we have to propagate the strides, for the case
+        #   that a NestedSDFG is inside the map, but this is done externally.
+        assert (
+            isinstance(other_node, dace_nodes.MapExit)
+            if is_producer_edge
+            else isinstance(other_node, dace_nodes.MapEntry)
+        )
+        if ss_offset is None:
+            if not isinstance(new_node.desc(sdfg), dace_data.Scalar):
+                raise TypeError(
+                    "Passed 'None' as 'ss_offset' but 'new_node' ({new_node.data}) is not a scalar."
+                )
+
+        for memlet_tree in state.memlet_tree(new_edge).traverse_children(include_self=False):
+            edge_to_adjust = memlet_tree.edge
+            memlet_to_adjust = edge_to_adjust.data
+
+            # If needed modify the association of the Memlet.
+            if memlet_to_adjust.data == old_node.data:
+                memlet_to_adjust.data = new_node.data
+
+            if ss_offset is None:
+                # Scalar modification
+                if is_producer_edge:
+                    memlet_to_adjust.dst_subset = "0"
+                else:
+                    memlet_to_adjust.src_subset = "0"
+
+            else:
+                # NOTE: Actually we should use the `get_{src, dst}_subset()` functions,
+                #  see https://github.com/spcl/dace/issues/1703. However, we can not
+                #  do that because the SDFG is currently in an invalid state. So
+                #  we have to call the properties and hope that it works.
+                subset_to_adjust = (
+                    memlet_to_adjust.dst_subset if is_producer_edge else memlet_to_adjust.src_subset
+                )
+                assert subset_to_adjust is not None
+                subset_to_adjust.offset(ss_offset, negative=False)
+
+    elif isinstance(other_node, dace_nodes.NestedSDFG):
+        # We have obviously to adjust the strides, however, this is done outside
+        #  this function.
+        # TODO(phimuell): Look into the implication that we not necessarily pass
+        #  the full array, but essentially slice a bit.
+        pass
+
+    else:
+        # As we encounter them we should handle them case by case.
+        raise NotImplementedError(
+            f"The case for '{type(other_node).__name__}' has not been implemented."
+        )
