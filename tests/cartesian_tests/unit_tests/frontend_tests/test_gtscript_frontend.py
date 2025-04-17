@@ -913,22 +913,18 @@ class TestExternalsWithSubroutines:
 class TestFunctionReturn:
     def test_no_return(self):
         @gtscript.function
-        def test_no_return(arg):
-            arg = 1
+        def test_no_return(in_place_update):
+            in_place_update[0, 0, 0] = 1
 
         def definition_func(phi: gtscript.Field[np.float64]):
             with computation(PARALLEL), interval(...):
-                phi = test_no_return(phi)
+                test_no_return(phi)
 
-        with pytest.raises(
-            gt_frontend.GTScriptSyntaxError,
-            match="should have a single return statement",
-        ):
-            parse_definition(
-                definition_func,
-                name=inspect.stack()[0][3],
-                module=self.__class__.__name__,
-            )
+        parse_definition(
+            definition_func,
+            name=inspect.stack()[0][3],
+            module=self.__class__.__name__,
+        )
 
     def test_number_return_args(self):
         @gtscript.function
@@ -961,7 +957,7 @@ class TestFunctionReturn:
 
         with pytest.raises(
             gt_frontend.GTScriptSyntaxError,
-            match="should have a single return statement",
+            match="cannot have multiple return statements",
         ):
             parse_definition(
                 definition_func,
