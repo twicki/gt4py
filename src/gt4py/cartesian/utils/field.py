@@ -25,7 +25,7 @@ class Field:
         shape = [field.shape[i] if i is not None else 1 for i in self.idx_to_data]
         self.field_view = np.reshape(field.data, shape).view(np.ndarray)
 
-        self.offsets = offsets
+        self.offsets = tuple([*offsets] + [0] * (len(field.shape) - sum(dimensions)))
 
     @classmethod
     def empty(cls, shape, dtype, offset):
