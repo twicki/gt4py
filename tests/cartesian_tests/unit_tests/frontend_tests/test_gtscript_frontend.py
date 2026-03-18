@@ -808,7 +808,7 @@ class TestIntervalSyntax:
 class TestRegions:
     def test_one_interval_only(self):
         def stencil(in_f: gtscript.Field[np.float64]):
-            with computation(PARALLEL), interval(...), horizontal(region[I[0:3], :]):
+            with computation(PARALLEL), interval(...), horizontal(region[0:3, :]):
                 in_f = 1.0
 
         def_ir = parse_definition(
@@ -820,7 +820,7 @@ class TestRegions:
 
     def test_one_interval_only_single(self):
         def stencil(in_f: gtscript.Field[np.float64]):
-            with computation(PARALLEL), interval(...), horizontal(region[I[0], :]):
+            with computation(PARALLEL), interval(...), horizontal(region[0, :]):
                 in_f = 1.0
 
         def_ir = parse_definition(
@@ -841,7 +841,7 @@ class TestRegions:
             stencil,
             name=inspect.stack()[0][3],
             module=self.__class__.__name__,
-            externals={"i1": I[1]},
+            externals={"i1": 1},
         )
 
         assert len(def_ir.computations) == 1
@@ -856,7 +856,7 @@ class TestRegions:
         def stencil(in_f: gtscript.Field[np.float64]):
             with computation(PARALLEL), interval(...):
                 in_f = in_f + 1.0
-                with horizontal(region[I[0], :], region[:, J[-1]]):
+                with horizontal(region[0, :], region[:, -1:]):
                     in_f = 1.0
 
         def_ir = parse_definition(
@@ -871,7 +871,7 @@ class TestRegions:
             from gt4py.cartesian.__externals__ import ie
 
             field = 0.0
-            with horizontal(region[ie, :]):
+            with horizontal(region[ie:, :]):
                 field = 1.0
 
             return field
@@ -884,7 +884,7 @@ class TestRegions:
             stencil,
             name=inspect.stack()[0][3],
             module=self.__class__.__name__,
-            externals={"ie": I[-1]},
+            externals={"ie": -1},
         )
 
     def test_error_undefined(self):

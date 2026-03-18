@@ -922,7 +922,7 @@ def test_pruned_args_match(backend):
     def test(out: Field[np.float64], inp: Field[np.float64]):  # type: ignore
         with computation(PARALLEL), interval(...):
             out = 0.0
-            with horizontal(region[I[0] - 1, J[0] - 1]):
+            with horizontal(region[-1:, -1:]):
                 out[0, 0, 0] = inp
 
     inp = gt_storage.zeros(
